@@ -1,7 +1,8 @@
-"""Aplicación pygame: loop principal.
+"""Aplicación pygame: loop principal y cambio de pantallas (menú ↔ partida).
 
-v1/M2: arranca directo en una partida humano vs AI con parámetros default.
-El menú (nueva partida con parámetros, cargar, salir) llega en M4.
+El menú decide qué partida arrancar (nueva con parámetros o cargada de un
+savegame); la partida vuelve al menú con ESC. Guardar está disponible
+durante la partida (botón del HUD o tecla G).
 """
 
 from __future__ import annotations
@@ -9,38 +10,53 @@ from __future__ import annotations
 import pygame
 
 from wom.core.game import Game, Player
-from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
+from wom.persistence.savegame import load_game
 from wom.ui import theme
 from wom.ui.game_screen import GameScreen
+from wom.ui.menu_screen import LoadChoice, MenuScreen, NewGameChoice
 
 WINDOW_TITLE = "WOM"
+HUMAN_ID = 0
 
 
-def run(seed: int | None = None, ai_level: str = "facil") -> None:
-    """Punto de entrada de la aplicación gráfica."""
+def new_game(choice: NewGameChoice) -> Game:
+    """Crea una partida humano vs AI según lo elegido en el menú."""
+    players = [
+        Player(HUMAN_ID, "Jugador"),
+        Player(1, f"AI ({choice.ai_level})", is_ai=True, ai_level=choice.ai_level),
+    ]
+    return Game.new(choice.map_params(), players, choice.victory_mode)
+
+
+def run(seed: int | None = None, ai_level: str = "medio") -> None:
+    """Punto de entrada de la aplicación gráfica. Arranca en el menú."""
     pygame.init()
     screen = pygame.display.set_mode(theme.WINDOW_SIZE)
     pygame.display.set_caption(WINDOW_TITLE)
     clock = pygame.time.Clock()
 
-    players = [
-        Player(0, "Jugador"),
-        Player(1, f"AI ({ai_level})", is_ai=True),
-    ]
-    game = Game.new(MapParams(seed=seed), players, VictoryMode.TOTAL)
-    game_screen = GameScreen(game, human_id=0, ai_level=ai_level)
-
+    current: MenuScreen | GameScreen = MenuScreen(ai_level, seed)
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                running = False
             else:
-                game_screen.handle_event(event)
-        game_screen.draw(screen)
+                current.handle_event(event)
+
+        if isinstance(current, MenuScreen):
+            action = current.take_action()
+            if action == "quit":
+                running = False
+            elif isinstance(action, NewGameChoice):
+                current = GameScreen(new_game(action), human_id=HUMAN_ID)
+            elif isinstance(action, LoadChoice):
+                current = GameScreen(load_game(action.path), human_id=HUMAN_ID)
+        elif current.wants_menu:
+            current = MenuScreen(ai_level, seed)
+
+        current.draw(screen)
         pygame.display.flip()
         clock.tick(theme.FPS)
 

@@ -49,6 +49,22 @@ class Player:
     name: str
     is_ai: bool = False
     food: int = 0  # stock de comida (producido por towns, consumido por forts)
+    # Nivel de la AI (facil/medio/dificil) si is_ai; lo persiste el savegame
+    # para reconstruir el AIPlayer al cargar la partida.
+    ai_level: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "is_ai": self.is_ai,
+            "food": self.food,
+            "ai_level": self.ai_level,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Player":
+        return cls(**data)
 
 
 @dataclass
@@ -302,6 +318,44 @@ class Game:
         self.armies.append(army)
         return army
 
+    def to_dict(self) -> dict:
+        """Estado completo serializable a JSON (savegames).
+
+        Incluye el estado interno del RNG: una partida cargada continúa
+        exactamente igual que la original (mismo mapa, mismas batallas).
+        `last_battles` y `_battle_queue` son transitorios y no se guardan.
+        """
+        return {
+            "seed": self.seed,
+            "turn": self.turn,
+            "victory_mode": self.victory_mode.value,
+            "world": self.world.to_dict(),
+            "players": [p.to_dict() for p in self.players],
+            "armies": [a.to_dict() for a in self.armies],
+            "crosses": [list(c) for c in self.crosses],
+            "next_army_id": self.next_army_id,
+            "rng_state": _encode_rng_state(self.rng.getstate()),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Game":
+        """Reconstruye una partida guardada; la config se relee de data/."""
+        rng = random.Random()
+        rng.setstate(_decode_rng_state(data["rng_state"]))
+        return cls(
+            world=WorldMap.from_dict(data["world"]),
+            players=[Player.from_dict(p) for p in data["players"]],
+            armies=[Army.from_dict(a) for a in data["armies"]],
+            classes=load_unit_classes(),
+            config=load_game_config(),
+            victory_mode=VictoryMode(data["victory_mode"]),
+            rng=rng,
+            seed=data["seed"],
+            turn=data["turn"],
+            crosses=[tuple(c) for c in data["crosses"]],
+            next_army_id=data["next_army_id"],
+        )
+
     def armies_of(self, player_id: int) -> list[Army]:
         return [a for a in self.armies if a.owner == player_id]
 
@@ -310,6 +364,17 @@ class Game:
 
     def army_at(self, pos: Coord) -> Army | None:
         return next((a for a in self.armies if a.position == pos), None)
+
+
+def _encode_rng_state(state: tuple) -> list:
+    """random.Random.getstate() → estructura JSON: (versión, ints, gauss)."""
+    version, internal, gauss_next = state
+    return [version, list(internal), gauss_next]
+
+
+def _decode_rng_state(data: list) -> tuple:
+    version, internal, gauss_next = data
+    return (version, tuple(internal), gauss_next)
 
 
 def _adjacent(a: Coord, b: Coord) -> bool:

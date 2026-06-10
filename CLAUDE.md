@@ -20,6 +20,8 @@ The virtualenv is `.venv\` (already created, pygame-ce and pytest installed).
 .venv\Scripts\python.exe main.py --headless --debug-ai           # log AI decisions
 .venv\Scripts\python.exe tools\gen_placeholders.py   # regenerate placeholder PNGs
 .venv\Scripts\python.exe tools\screenshot_m2.py      # render a game frame to docs/screenshot_m2.png (no window)
+.venv\Scripts\python.exe tools\screenshot_menu.py    # render the 3 menu views to docs/screenshot_menu_*.png
+.venv\Scripts\python.exe tools\simulate.py --games 30            # AI balance simulation (--detail for per-game)
 ```
 
 Scripts in `tools/` need the project root on `PYTHONPATH` (`$env:PYTHONPATH='D:\dev\WOM'`); `main.py` and pytest do not. UI tests run headless via `SDL_VIDEODRIVER=dummy` (set inside the test files).
@@ -29,9 +31,9 @@ Scripts in `tools/` need the project root on `PYTHONPATH` (`$env:PYTHONPATH='D:\
 Strict three-layer separation — **`wom/core/` must never import pygame** (enforced by `tests/test_smoke.py::test_core_does_not_import_pygame`):
 
 - `wom/core/` — pure game logic: map + random generator (`worldmap.py`, `mapgen.py`), armies (`army.py`), turn engine (`game.py`), auto-resolved battles (`battle.py`), victory conditions (`victory.py`), config loading (`config.py`). Runs headless for tests and mass AI-vs-AI simulation.
-- `wom/ai/` — AI players. Same interface as a human player: `decide_orders(game) -> list[Order]`. The three difficulty levels share one codebase and differ only in weights from `data/config/ai.json`.
+- `wom/ai/` — AI players. Same interface as a human player: `decide_orders(game) -> list[Order]`. The three difficulty levels share one codebase (an objective-scoring engine: capture/attack/defend/resupply, discounted by distance/horizon) and differ only in weights and capability flags from `data/config/ai.json` (`agrupa`, `coordina`, `evita_peligro` are dificil-only). Balance is validated with `tools/simulate.py` (mass AI-vs-AI, alternating sides); keep dificil > medio > facil when touching AI params.
 - `wom/ui/` — the only package allowed to import pygame. Produces the same `Order` objects as the AI.
-- `wom/persistence/` — JSON savegames in `saves/`.
+- `wom/persistence/` — JSON savegames in `saves/` (`savegame.py`: `save_game`/`load_game`/`list_saves`/`save_info`; all take an optional `directory`, which tests use with `tmp_path`). A savegame stores `format_version`, timestamp and `Game.to_dict()` — including the RNG state and each player's `ai_level` — so a loaded game continues deterministically. Balance config is re-read from `data/config/` on load, never stored.
 
 Key invariants:
 - All randomness goes through the game's seeded `random.Random` (`Game.rng`) — battles and map generation must be deterministic given a seed (replays, tests).
@@ -42,6 +44,6 @@ Key invariants:
 
 ## Roadmap status
 
-M1 (core + basic AI + headless) and M2 (playable pygame UI: map render, mouse orders with auto-pathing and waypoints, end turn, game-over overlay) are **done** and tested. `main.py` starts a human-vs-AI game directly (no menu yet). Remaining milestones: M3 (medium/hard AI in `wom/ai/ai_player.py` — easy strategy currently shared by all levels; balance tuning), M4 (menu + savegames in `wom/persistence/savegame.py`), M5 (PyInstaller builds). Milestones defined in `docs/especificaciones.md` §8. v1 explicitly excludes: tactical battle zoom, map editor, multiplayer.
+M1 (core + basic AI + headless), M2 (playable pygame UI: map render, mouse orders with auto-pathing and waypoints, end turn, game-over overlay), M3 (objective-scoring AI with three validated difficulty levels) and M4 (main menu + savegames) are **done** and tested. `main.py` opens the menu (`wom/ui/menu_screen.py`): new game (AI level, map size, victory mode), load game, quit; in-game saving via HUD button or G key, ESC returns to the menu. Remaining milestone: M5 (PyInstaller builds). Milestones defined in `docs/especificaciones.md` §8. v1 explicitly excludes: tactical battle zoom, map editor, multiplayer.
 
 Battle semantics: combat triggers when an army tries to *enter* an enemy's tile — armies never share a tile; each side fights from its own tile (own terrain bonus, defender gets fort/town bonus). Losers/retreaters fall back one tile.

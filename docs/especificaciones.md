@@ -142,15 +142,16 @@ El modo de victoria activo se elige al crear la partida.
 
 ## 5. UI (`ui/`)
 
-- **Menú** (v1): Nueva partida (parámetros de mapa + nivel AI + condición de victoria), Cargar partida, Salir. Guardar disponible durante la partida.
+- **Menú** (v1, implementado en M4): Nueva partida (nivel de AI, tamaño de mapa chico/medio/grande y condición de victoria, opciones cíclicas por click), Cargar partida (lista de saves con turno y fecha), Salir. Guardar disponible durante la partida (botón del HUD o tecla G); ESC vuelve al menú.
 - **Vista de mapa**: tiles con sprites PNG, ejércitos como íconos con contador de tropas, banderas de color por jugador, cruces donde murieron ejércitos.
 - **Órdenes**: click en ejército → click(s) en el mapa para trazar el camino → el path se dibuja. Botón "Fin del turno".
 - **Assets placeholder**: PNG planos generados por script (`tools/gen_placeholders.py`): tiles de 64×64 px, unidades de 48×48 px, íconos de 32×32 px. El arte final reemplaza archivos con el mismo nombre y tamaño.
 
 ## 6. Persistencia (`persistence/`)
 
-- Savegame = JSON con: versión de formato, seed, parámetros de partida, mapa completo, estado de todos los ejércitos/forts/towns, número de turno, modo de victoria.
-- Guardar en `saves/` con timestamp; cargar reconstruye `Game` exacto.
+- Savegame = JSON con: versión de formato (`format_version`), fecha de guardado, seed, mapa completo, estado de todos los ejércitos/forts/towns/jugadores (incluido el nivel de AI), número de turno, modo de victoria **y el estado interno del RNG**: una partida cargada continúa exactamente igual que la original (mismas batallas con la misma seed).
+- La config de balance (`data/config/*.json`) no viaja en el savegame: se relee al cargar.
+- Guardar en `saves/` con timestamp; cargar reconstruye `Game` exacto (validado por test de continuación determinista).
 
 ## 7. Estructura del proyecto
 

@@ -1,7 +1,7 @@
 """Smoke tests de la UI con el driver dummy de SDL (sin abrir ventana).
 
 Simulan una partida humano vs AI: render, selección por click, trazado de
-path y fin de turno — el flujo completo de M2.
+path, fin de turno (M2) y el menú principal + guardar/cargar (M4).
 """
 
 import os
@@ -11,11 +11,13 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 import pytest
 
+import wom.persistence.savegame as savegame
 from wom.core.game import Game, Player
 from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
 from wom.ui import theme
 from wom.ui.game_screen import GameScreen
+from wom.ui.menu_screen import LoadChoice, MenuScreen, NewGameChoice
 
 
 @pytest.fixture(scope="module")
@@ -108,6 +110,76 @@ def test_crear_ejercito_desde_fuerte(screen, game_screen):
     created = game.army_at(fort.position)
     assert created is not None and created.owner == 0
     assert created.total_troops >= 50
+
+
+def test_guardar_desde_la_partida(screen, game_screen, tmp_path, monkeypatch):
+    monkeypatch.setattr(savegame, "SAVES_DIR", tmp_path)
+    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_g}))
+    saved = list(tmp_path.glob("*.json"))
+    assert len(saved) == 1
+    assert game_screen.notice is not None and "guardada" in game_screen.notice
+    game_screen.draw(screen)  # el aviso no debe romper el HUD
+    loaded = savegame.load_game(saved[0])
+    assert loaded.to_dict() == game_screen.game.to_dict()
+
+
+def test_esc_vuelve_al_menu(game_screen):
+    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE}))
+    assert game_screen.wants_menu
+
+
+def test_menu_nueva_partida(screen):
+    menu = MenuScreen(default_ai_level="facil")
+    menu.draw(screen)
+    _click_menu(menu, "new")
+    assert menu.mode == "new"
+    menu.draw(screen)
+
+    _click_menu(menu, "ai_level")  # facil → medio
+    _click_menu(menu, "victory")   # total → flags
+    menu.draw(screen)
+    _click_menu(menu, "start")
+    action = menu.take_action()
+    assert isinstance(action, NewGameChoice)
+    assert action.ai_level == "medio"
+    assert action.victory_mode == VictoryMode.FLAGS
+    assert action.map_params().width == 30  # tamaño "medio" por defecto
+    assert menu.take_action() is None  # la acción se consume
+
+
+def test_menu_cargar_partida(screen, tmp_path, monkeypatch):
+    monkeypatch.setattr(savegame, "SAVES_DIR", tmp_path)
+    players = [Player(0, "Humano"), Player(1, "AI", is_ai=True, ai_level="medio")]
+    game = Game.new(MapParams(seed=11), players, VictoryMode.TOTAL)
+    path = savegame.save_game(game)
+
+    menu = MenuScreen()
+    menu.draw(screen)
+    _click_menu(menu, "load")
+    assert menu.mode == "load"
+    menu.draw(screen)
+    _click_menu(menu, f"save:{path}")
+    action = menu.take_action()
+    assert isinstance(action, LoadChoice) and action.path == path
+
+
+def test_menu_esc_retrocede_y_sale(screen):
+    menu = MenuScreen()
+    menu.draw(screen)
+    _click_menu(menu, "new")
+    esc = pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE})
+    menu.handle_event(esc)
+    assert menu.mode == "main" and menu.take_action() is None
+    menu.handle_event(esc)
+    assert menu.take_action() == "quit"
+
+
+def _click_menu(menu: MenuScreen, button_id: str) -> None:
+    """Click en el centro de un botón del menú (requiere draw previo)."""
+    point = menu._buttons[button_id].center
+    menu.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": point, "button": 1})
+    )
 
 
 def test_partida_completa_desde_la_ui(screen, game_screen):

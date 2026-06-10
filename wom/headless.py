@@ -30,8 +30,8 @@ def run_headless(
     if seed is not None and params.seed != seed:
         params = MapParams(params.width, params.height, params.n_forts, params.n_towns, seed)
     players = [
-        Player(0, f"AI Rojo ({levels[0]})", is_ai=True),
-        Player(1, f"AI Azul ({levels[1]})", is_ai=True),
+        Player(0, f"AI Rojo ({levels[0]})", is_ai=True, ai_level=levels[0]),
+        Player(1, f"AI Azul ({levels[1]})", is_ai=True, ai_level=levels[1]),
     ]
     game = Game.new(params, players, victory_mode)
     ais = [AIPlayer(p.id, levels[p.id], debug=debug_ai) for p in players]

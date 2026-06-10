@@ -1,7 +1,7 @@
 """Punto de entrada de WOM.
 
 Uso:
-    python main.py                        # abre el juego (UI pygame)
+    python main.py                        # abre el juego (menú pygame)
     python main.py --headless             # partida AI vs AI por consola
     python main.py --headless --seed 42   # partida reproducible
     python main.py --headless --debug-ai  # loguea las decisiones de la AI
@@ -42,7 +42,8 @@ def main() -> None:
 
     from wom.ui.app import run
 
-    # En modo UI el rival es la AI 1: su nivel es el segundo valor de --level.
+    # En modo UI arranca el menú; --seed y --level (el segundo valor) quedan
+    # como valores iniciales de "Nueva partida".
     run(seed=args.seed, ai_level=args.level[1])
 
 

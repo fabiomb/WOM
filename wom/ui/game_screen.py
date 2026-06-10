@@ -8,6 +8,8 @@ Interacción:
   HUD ofrece "Crear ejército" (toma tropas de la reserva del fuerte).
 - Click derecho: borra el camino trazado y deselecciona.
 - Botón "Fin del turno" o Enter: ejecuta el turno (humano + AI).
+- Botón "Guardar" o tecla G: guarda la partida en saves/ con timestamp.
+- ESC: vuelve al menú principal (la partida no guardada se pierde).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from wom.core.orders import CreateArmyOrder, MoveOrder, Order
 from wom.core.pathfind import shortest_path
 from wom.core.victory import VictoryResult
 from wom.core.worldmap import Coord
+from wom.persistence.savegame import save_game
 from wom.ui import theme
 from wom.ui.assets import Assets
 from wom.ui.hud import Hud
@@ -30,12 +33,18 @@ class GameScreen:
     def __init__(self, game: Game, human_id: int = 0, ai_level: str = "facil"):
         self.game = game
         self.human_id = human_id
-        self.ais = [AIPlayer(p.id, ai_level) for p in game.players if p.is_ai]
+        # El nivel viaja en Player.ai_level (savegames); el parámetro es fallback.
+        self.ais = [
+            AIPlayer(p.id, p.ai_level or ai_level) for p in game.players if p.is_ai
+        ]
         self.selected_id: int | None = None
         self.selected_fort: Coord | None = None
         self.pending_paths: dict[int, list[Coord]] = {}
         self.pending_creations: set[Coord] = set()
         self.result: VictoryResult | None = None
+        self.wants_menu = False  # lo activa ESC; lo consume el loop de app
+        self.notice: str | None = None  # aviso temporal del HUD ("guardada...")
+        self.notice_until = 0
 
         window = pygame.display.get_surface().get_rect()
         map_area = pygame.Rect(
@@ -56,13 +65,20 @@ class GameScreen:
     # --- input -------------------------------------------------------------
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.wants_menu = True
+            return
         if self.game_over:
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
             self.end_turn()
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_g:
+            self.save()
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.hud.hit_end_turn(event.pos):
                 self.end_turn()
+            elif self.hud.hit_save(event.pos):
+                self.save()
             elif self.selected_fort is not None and self.hud.hit_create_army(event.pos):
                 self._toggle_creation(self.selected_fort)
             else:
@@ -114,6 +130,14 @@ class GameScreen:
         if segment:
             self.pending_paths[army_id] = current + segment
 
+    # --- guardado --------------------------------------------------------------
+
+    def save(self) -> None:
+        """Guarda la partida con timestamp y muestra un aviso unos segundos."""
+        path = save_game(self.game)
+        self.notice = f"Partida guardada: {path.name}"
+        self.notice_until = pygame.time.get_ticks() + 3000
+
     # --- turno ---------------------------------------------------------------
 
     def end_turn(self) -> None:
@@ -148,7 +172,8 @@ class GameScreen:
             self.game.world.fort_at(self.selected_fort)
             if self.selected_fort is not None else None
         )
+        notice = self.notice if pygame.time.get_ticks() < self.notice_until else None
         self.hud.draw(
             surface, self.game, selected, fort,
-            self.selected_fort in self.pending_creations, self.result,
+            self.selected_fort in self.pending_creations, self.result, notice,
         )

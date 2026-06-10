@@ -20,13 +20,19 @@ class Hud:
         self.button = pygame.Rect(
             rect.x + 20, rect.bottom - 60, rect.width - 40, 42
         )
+        self.save_button = pygame.Rect(
+            rect.x + 20, rect.bottom - 110, rect.width - 40, 36
+        )
         self.create_button = pygame.Rect(
-            rect.x + 20, rect.bottom - 115, rect.width - 40, 42
+            rect.x + 20, rect.bottom - 160, rect.width - 40, 42
         )
         self._create_button_visible = False
 
     def hit_end_turn(self, point: tuple[int, int]) -> bool:
         return self.button.collidepoint(point)
+
+    def hit_save(self, point: tuple[int, int]) -> bool:
+        return self.save_button.collidepoint(point)
 
     def hit_create_army(self, point: tuple[int, int]) -> bool:
         return self._create_button_visible and self.create_button.collidepoint(point)
@@ -39,6 +45,7 @@ class Hud:
         selected_fort: Fort | None = None,
         creation_pending: bool = False,
         result: VictoryResult | None = None,
+        notice: str | None = None,
     ) -> None:
         pygame.draw.rect(surface, theme.SIDEBAR_BG, self.rect)
         x = self.rect.x + 20
@@ -131,6 +138,19 @@ class Hud:
                 text = "Cancelar creación" if creation_pending else "Crear ejército"
                 label = self.font.render(text, True, theme.TEXT)
                 surface.blit(label, label.get_rect(center=self.create_button.center))
+            if notice:
+                rendered = self.small_font.render(notice, True, theme.SELECTION)
+                surface.blit(
+                    rendered,
+                    rendered.get_rect(midbottom=(self.rect.centerx, self.save_button.top - 8)),
+                )
+            over = self.save_button.collidepoint(pygame.mouse.get_pos())
+            pygame.draw.rect(
+                surface, (70, 78, 86) if over else (50, 56, 62),
+                self.save_button, border_radius=6,
+            )
+            label = self.small_font.render("Guardar partida (G)", True, theme.TEXT)
+            surface.blit(label, label.get_rect(center=self.save_button.center))
             over = self.button.collidepoint(pygame.mouse.get_pos())
             pygame.draw.rect(
                 surface, theme.BUTTON_BG_OVER if over else theme.BUTTON_BG,
@@ -153,7 +173,7 @@ class Hud:
         center = surface.get_rect().center
         title = self.title_font.render(text, True, color)
         reason = self.font.render(result.reason, True, theme.TEXT)
-        hint = self.small_font.render("ESC para salir", True, theme.TEXT_DIM)
+        hint = self.small_font.render("ESC para volver al menú", True, theme.TEXT_DIM)
         surface.blit(title, title.get_rect(center=(center[0], center[1] - 30)))
         surface.blit(reason, reason.get_rect(center=center))
         surface.blit(hint, hint.get_rect(center=(center[0], center[1] + 30)))

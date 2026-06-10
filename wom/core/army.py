@@ -37,3 +37,27 @@ class Army:
         for class_id, n in losses.items():
             current = self.composition.get(class_id, 0)
             self.composition[class_id] = max(0, current - n)
+
+    def to_dict(self) -> dict:
+        """Serialización a dict (savegames)."""
+        return {
+            "id": self.id,
+            "owner": self.owner,
+            "position": list(self.position),
+            "composition": dict(self.composition),
+            "xp": self.xp,
+            "food": self.food,
+            "path": [list(step) for step in self.path],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Army":
+        return cls(
+            id=data["id"],
+            owner=data["owner"],
+            position=tuple(data["position"]),
+            composition=dict(data["composition"]),
+            xp=data["xp"],
+            food=data["food"],
+            path=[tuple(step) for step in data["path"]],
+        )
