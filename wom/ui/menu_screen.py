@@ -5,9 +5,11 @@ o un NewGameChoice / LoadChoice / "quit" que el loop de la app consume con
 `take_action()`. ESC retrocede de un submenú al menú principal; en el menú
 principal equivale a Salir.
 
-Opciones configura la música (on/off, volumen, carpeta, orden) a través del
-MusicPlayer que le pasa la app; cada cambio se aplica y persiste al instante
-(settings.json). La carpeta se edita escribiendo en el propio botón.
+Opciones es un hub con dos submenús: Sonido (música on/off, volumen,
+carpeta — editable escribiendo en el propio botón — y orden) y Video
+(resolución de ventana, iniciar maximizado). Operan a través del MusicPlayer
+que le pasa la app; cada cambio se aplica y persiste al instante
+(settings.json). ESC retrocede de a un nivel: submenú → Opciones → main.
 """
 
 from __future__ import annotations
@@ -113,7 +115,9 @@ class MenuScreen:
             self._edit_folder_key(event)
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            if self.mode == "main":
+            if self.mode in ("sound", "video"):
+                self.mode = "options"  # un nivel atrás: al hub de opciones
+            elif self.mode == "main":
                 self.action = "quit"
             else:
                 self.mode = "main"
@@ -169,11 +173,18 @@ class MenuScreen:
             elif hit.startswith("save:"):
                 self.action = LoadChoice(Path(hit[len("save:"):]))
         elif self.mode == "options":
-            self._click_option(hit)
+            if hit in ("sound", "video"):
+                self.mode = hit
+            elif hit == "back":
+                self.mode = "main"
+        elif self.mode == "sound":
+            self._click_sound(hit)
+        elif self.mode == "video":
+            self._click_video(hit)
 
-    def _click_option(self, hit: str) -> None:
+    def _click_sound(self, hit: str) -> None:
         if hit == "back":
-            self.mode = "main"
+            self.mode = "options"
             return
         if self.music is None:
             return  # sin reproductor (tests headless): las opciones no aplican
@@ -188,7 +199,15 @@ class MenuScreen:
             self._editing_folder = settings.music_folder
         elif hit == "music_order":
             self.music.set_shuffle(not settings.music_shuffle)
-        elif hit == "video_res":
+
+    def _click_video(self, hit: str) -> None:
+        if hit == "back":
+            self.mode = "options"
+            return
+        if self.music is None:
+            return
+        settings = self.music.settings
+        if hit == "video_res":
             current = settings.video_resolution
             settings.video_resolution = (
                 _next(RESOLUTIONS, current) if current in RESOLUTIONS else RESOLUTIONS[0]
@@ -233,6 +252,10 @@ class MenuScreen:
             self._draw_new(surface, area)
         elif self.mode == "options":
             self._draw_options(surface, area)
+        elif self.mode == "sound":
+            self._draw_sound(surface, area)
+        elif self.mode == "video":
+            self._draw_video(surface, area)
         else:
             self._draw_load(surface, area)
 
@@ -266,6 +289,14 @@ class MenuScreen:
         self._button(surface, "back", "Volver (ESC)", area, y, option_style=True)
 
     def _draw_options(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        """Hub de opciones: elegir la categoría a configurar."""
+        rows = (("sound", "Sonido"), ("video", "Video"), ("back", "Volver (ESC)"))
+        height = len(rows) * BUTTON_SIZE[1] + (len(rows) - 1) * BUTTON_GAP
+        y = area.y + max(0, (area.height - height) // 2)
+        for bid, label in rows:
+            y = self._button(surface, bid, label, area, y)
+
+    def _draw_sound(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         settings = self.music.settings if self.music is not None else Settings()
         if self._editing_folder is not None:
             folder_label = f"Carpeta:  {self._editing_folder}_"
@@ -277,18 +308,34 @@ class MenuScreen:
             ("music_folder", folder_label),
             ("music_order",
              f"Orden:  {'aleatorio' if settings.music_shuffle else 'secuencial'}"),
+        )
+        hint = (
+            "(escribí la ruta y Enter)" if self._editing_folder is not None
+            else "(click para cambiar · M abre el reproductor)"
+        )
+        self._draw_option_rows(surface, area, rows, hint)
+
+    def _draw_video(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        settings = self.music.settings if self.music is not None else Settings()
+        rows = (
             ("video_res", f"Resolución:  {settings.video_resolution}"),
             ("video_max",
              f"Iniciar maximizado:  {'sí' if settings.video_maximized else 'no'}"),
         )
+        self._draw_option_rows(surface, area, rows, "(click para cambiar)")
+
+    def _draw_option_rows(
+        self,
+        surface: pygame.Surface,
+        area: pygame.Rect,
+        rows: tuple[tuple[str, str], ...],
+        hint_text: str,
+    ) -> None:
+        """Filas de un submenú de opciones + hint + Volver."""
         y = area.y + 6
         for bid, label in rows:
             y = self._button(surface, bid, label, area, y, option_style=True)
         hint_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
-        hint_text = (
-            "(escribí la ruta y Enter)" if self._editing_folder is not None
-            else "(click para cambiar · M abre el reproductor)"
-        )
         hint = self.small_font.render(hint_text, True, hint_color)
         surface.blit(hint, hint.get_rect(center=(area.centerx, y + 6)))
         y += 30

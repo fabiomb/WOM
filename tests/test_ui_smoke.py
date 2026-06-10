@@ -250,9 +250,12 @@ def test_menu_opciones(screen, tmp_path):
     menu = MenuScreen(music=player)
     menu.draw(screen)
     _click_menu(menu, "options")
-    assert menu.mode == "options"
+    assert menu.mode == "options"  # hub: Sonido / Video
     menu.draw(screen)
 
+    _click_menu(menu, "sound")
+    assert menu.mode == "sound"
+    menu.draw(screen)
     _click_menu(menu, "music_volume")  # 70% → 80%
     assert player.settings.music_volume == 0.8
     _click_menu(menu, "music_order")  # aleatorio → secuencial
@@ -269,13 +272,25 @@ def test_menu_opciones(screen, tmp_path):
         )
     assert player.settings.music_folder == str(tmp_path)[:-1] + "a"
 
-    # opciones de video: la resolución cicla y el maximizado conmuta
+    # ESC vuelve al hub; el submenú de video cicla resolución y maximizado
+    menu.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE}))
+    assert menu.mode == "options"
+    menu.draw(screen)
+    _click_menu(menu, "video")
+    assert menu.mode == "video"
     menu.draw(screen)
     _click_menu(menu, "video_res")  # 1280x720 → 1600x900
     assert player.settings.video_resolution == "1600x900"
     _click_menu(menu, "video_max")
     assert player.settings.video_maximized is True
     menu.draw(screen)
+
+    # ESC retrocede de a un nivel hasta el menú principal
+    esc = pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE})
+    menu.handle_event(esc)
+    assert menu.mode == "options"
+    menu.handle_event(esc)
+    assert menu.mode == "main" and menu.take_action() is None
 
     saved = load_settings(tmp_path / "settings.json")  # todo quedó persistido
     assert saved.music_volume == 0.8 and saved.music_shuffle is False
