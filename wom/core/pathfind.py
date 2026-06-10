@@ -15,12 +15,17 @@ INF = float("inf")
 
 
 def dijkstra(
-    world: WorldMap, start: Coord, terrain_costs: dict[str, int]
+    world: WorldMap,
+    start: Coord,
+    terrain_costs: dict[str, int],
+    extra_cost: dict[Coord, float] | None = None,
 ) -> tuple[dict[Coord, float], dict[Coord, Coord]]:
     """Distancias mínimas desde `start` a todo tile transitable.
 
-    Devuelve (dist, prev): costo acumulado por tile y predecesor de cada
-    tile para reconstruir caminos.
+    `extra_cost` agrega costo artificial por tile (p. ej. zonas de peligro
+    cerca de ejércitos enemigos fuertes: la AI las rodea si hay desvío
+    razonable). Devuelve (dist, prev): costo acumulado por tile y
+    predecesor de cada tile para reconstruir caminos.
     """
     dist: dict[Coord, float] = {start: 0.0}
     prev: dict[Coord, Coord] = {}
@@ -31,6 +36,8 @@ def dijkstra(
             continue
         for neighbor in world.neighbors(pos):
             cost = terrain_costs[world.terrain_at(neighbor).value]
+            if extra_cost is not None:
+                cost += extra_cost.get(neighbor, 0.0)
             nd = d + cost
             if nd < dist.get(neighbor, INF):
                 dist[neighbor] = nd
