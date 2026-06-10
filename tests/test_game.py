@@ -232,7 +232,20 @@ def test_ejercito_sin_xp_muere_con_cruz():
     army.xp = 0
     game.run_turn([])
     assert army not in game.armies
-    assert (4, 4) in game.crosses
+    assert (4, 4, 0) in game.crosses  # cruz con el turno de la muerte
+
+
+def test_las_cruces_desaparecen_tras_su_vida_util():
+    game = _make_game()
+    army = game.spawn_army(0, (4, 4), {"soldado": 10})
+    army.xp = 0
+    game.run_turn([])  # muere en el turno 0
+    lifetime = game.config["turnos_cruz"]
+    for _ in range(lifetime - 1):
+        game.run_turn([])
+    assert (4, 4, 0) in game.crosses  # edad == turnos_cruz: último turno visible
+    game.run_turn([])
+    assert game.crosses == []  # superó la vida útil: el mapa queda limpio
 
 
 def test_victoria_total():

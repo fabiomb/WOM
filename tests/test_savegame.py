@@ -57,6 +57,16 @@ def test_continuacion_deterministica_tras_cargar(tmp_path):
     assert loaded.to_dict() == game.to_dict()
 
 
+def test_carga_cruces_de_formato_viejo():
+    """Saves anteriores guardaban cruces sin edad ([x, y]): al cargar se les
+    asigna el turno actual y empiezan a desvanecerse desde ahí."""
+    data = _new_game().to_dict()
+    data["turn"] = 7
+    data["crosses"] = [[4, 4]]
+    loaded = Game.from_dict(data)
+    assert loaded.crosses == [(4, 4, 7)]
+
+
 def test_save_con_timestamp_y_list_saves(tmp_path):
     game = _new_game()
     older = save_game(game, name="vieja", directory=tmp_path)

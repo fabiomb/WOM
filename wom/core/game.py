@@ -87,7 +87,9 @@ class Game:
     rng: random.Random
     seed: int
     turn: int = 0
-    crosses: list[Coord] = field(default_factory=list)  # ejércitos muertos
+    # Cruces de ejércitos muertos: (x, y, turno de la muerte). La UI las
+    # desvanece con la edad y el core las purga tras `turnos_cruz` turnos.
+    crosses: list[tuple[int, int, int]] = field(default_factory=list)
     next_army_id: int = 0
     # Batallas del último turno: (posición del defensor, nombre del resultado).
     # Lo consumen la UI (feedback al jugador) y el debug de la AI.
@@ -137,6 +139,7 @@ class Game:
         self._produce()
         self._recover()
         self.turn += 1
+        self._fade_crosses()
         return check_victory(self, self.victory_mode)
 
     def _spawn_initial_armies(self) -> None:
@@ -341,8 +344,13 @@ class Game:
         # Las tropas que quedaban (p. ej. al morir por XP) también cuentan
         # como perdidas.
         self.players[army.owner].troops_lost += army.total_troops
-        self.crosses.append(army.position)
+        self.crosses.append((*army.position, self.turn))
         self.armies.remove(army)
+
+    def _fade_crosses(self) -> None:
+        """Purga las cruces que ya cumplieron su vida útil (turnos_cruz)."""
+        lifetime = self.config["turnos_cruz"]
+        self.crosses = [c for c in self.crosses if self.turn - c[2] <= lifetime]
 
     # --- consultas y helpers usados por UI, AI y persistencia -------------
 
@@ -423,7 +431,12 @@ class Game:
             rng=rng,
             seed=data["seed"],
             turn=data["turn"],
-            crosses=[tuple(c) for c in data["crosses"]],
+            # Compat con saves previos a las cruces con edad ([x, y]): se les
+            # asigna el turno actual y empiezan a desvanecerse desde ahora.
+            crosses=[
+                tuple(c) if len(c) == 3 else (c[0], c[1], data["turn"])
+                for c in data["crosses"]
+            ],
             next_army_id=data["next_army_id"],
         )
 

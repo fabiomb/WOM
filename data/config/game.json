@@ -30,5 +30,6 @@
     "factor_xp_min": 0.5
   },
   "turnos_limite_default": 50,
+  "turnos_cruz": 5,
   "costo_terreno": { "plains": 1, "forest": 2, "mountain": 3 }
 }

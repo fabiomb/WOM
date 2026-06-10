@@ -93,9 +93,17 @@ class MapRenderer:
                     surface.blit(text, pos)
 
     def _draw_crosses(self, surface: pygame.Surface, game: Game) -> None:
+        """Las cruces se desvanecen con la edad hasta que el core las purga
+        (turnos_cruz): opacidad plena el turno siguiente a la muerte y un
+        quinto por turno desde ahí."""
         cross = self.assets.icons["cross"]
-        for pos in game.crosses:
-            surface.blit(cross, cross.get_rect(center=self.tile_center(pos)))
+        lifetime = game.config["turnos_cruz"]
+        for x, y, died_turn in game.crosses:
+            age = game.turn - died_turn
+            opacity = max(0.0, min(1.0, (lifetime - age + 1) / lifetime))
+            cross.set_alpha(round(255 * opacity))
+            surface.blit(cross, cross.get_rect(center=self.tile_center((x, y))))
+        cross.set_alpha(255)
 
     def _draw_paths(
         self,
