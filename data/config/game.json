@@ -1,0 +1,34 @@
+{
+  "max_army_size": 100,
+  "xp_inicial": 100,
+  "xp_recuperacion": { "fort": 10, "town": 5, "campo": 1 },
+  "comida_inicial": 10,
+  "comida_por_town": 1,
+  "tasa_produccion_fort": 0.5,
+  "max_reserva_fort": 150,
+  "ejercito_inicial": { "partisano": 10, "soldado": 30, "caballero": 10, "arquero": 10 },
+  "comida_ejercito": {
+    "decaimiento_por_turno": 5,
+    "refuerzo_en_base": 50,
+    "costo_stock_refuerzo": 1
+  },
+  "batalla": {
+    "sigma_aleatoriedad": 0.2,
+    "umbral_victoria": 1.5,
+    "umbral_retirada": 0.6,
+    "margen_empate": 0.1,
+    "perdida_base": 0.2,
+    "perdida_max": 0.9,
+    "xp_perdida_ganador": 5,
+    "xp_perdida_perdedor": 15,
+    "xp_perdida_empate": 10,
+    "penalidad_retirada_xp": 20,
+    "penalidad_retirada_tropas": 0.15,
+    "bonus_defensa_fort": 1.5,
+    "bonus_defensa_town": 1.2,
+    "factor_comida_min": 0.5,
+    "factor_xp_min": 0.5
+  },
+  "turnos_limite_default": 50,
+  "costo_terreno": { "plains": 1, "forest": 2, "mountain": 3 }
+}

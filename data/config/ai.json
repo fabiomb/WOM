@@ -1,0 +1,32 @@
+{
+  "facil": {
+    "horizonte": 1,
+    "agresividad": 0.8,
+    "peso_economia": 0.0,
+    "peso_defensa": 0.2,
+    "umbral_ataque": 0.8,
+    "umbral_crear_ejercito": 40,
+    "agrupa": false,
+    "descripcion": "Ataca casi siempre, ignora la economía y la defensa."
+  },
+  "medio": {
+    "horizonte": 3,
+    "agresividad": 0.5,
+    "peso_economia": 0.4,
+    "peso_defensa": 0.5,
+    "umbral_ataque": 1.1,
+    "umbral_crear_ejercito": 30,
+    "agrupa": false,
+    "descripcion": "Calcula distancias, defiende fuertes, ataca con ventaja numérica."
+  },
+  "dificil": {
+    "horizonte": 5,
+    "agresividad": 0.6,
+    "peso_economia": 0.8,
+    "peso_defensa": 0.7,
+    "umbral_ataque": 1.3,
+    "umbral_crear_ejercito": 20,
+    "agrupa": true,
+    "descripcion": "Gestiona economía, agrupa ejércitos y reacciona al jugador."
+  }
+}
