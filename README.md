@@ -32,9 +32,17 @@ comida y batallas autoresueltas. Hecho en **Python 3.13 + pygame-ce**.
 
 ## Cómo jugar
 
+**Linux / macOS**
 ```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt   # pygame-ce, pytest
+.venv/bin/python main.py
+```
+
+**Windows**
+```powershell
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt   # pygame-ce, pytest
+.venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python main.py
 ```
 
@@ -46,8 +54,13 @@ uno. `Enter` termina el turno, `G` guarda la partida, `ESC` vuelve al menú.
 ### Modo headless (sin ventana)
 
 ```bash
-python main.py --headless --seed 42      # IA vs IA por consola
-python main.py --headless --debug-ai     # con log de decisiones de la IA
+# Linux
+.venv/bin/python main.py --headless --seed 42      # IA vs IA por consola
+.venv/bin/python main.py --headless --debug-ai     # con log de decisiones de la IA
+
+# Windows
+.venv\Scripts\python main.py --headless --seed 42
+.venv\Scripts\python main.py --headless --debug-ai
 ```
 
 ## Documentación
@@ -84,10 +97,18 @@ originales se conservan con prefijo `_` y se regeneran con
 
 ## Tests y herramientas
 
+**Linux**
 ```bash
-.venv\Scripts\python -m pytest tests -v             # suite completa
-.venv\Scripts\python tools\simulate.py --games 30   # balance IA vs IA
-.venv\Scripts\python tools\screenshot_m2.py         # captura headless del juego
+.venv/bin/python -m pytest tests -v                       # suite completa
+PYTHONPATH=. .venv/bin/python tools/simulate.py --games 30  # balance IA vs IA
+PYTHONPATH=. .venv/bin/python tools/screenshot_m2.py        # captura headless del juego
+```
+
+**Windows**
+```powershell
+.venv\Scripts\python -m pytest tests -v
+$env:PYTHONPATH='D:\dev\WOM'; .venv\Scripts\python tools\simulate.py --games 30
+$env:PYTHONPATH='D:\dev\WOM'; .venv\Scripts\python tools\screenshot_m2.py
 ```
 
 Los scripts de `tools/` necesitan la raíz del proyecto en `PYTHONPATH`.
