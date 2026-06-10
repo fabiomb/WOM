@@ -13,11 +13,14 @@ Fases de un turno (orden fijo, determinista dada la seed):
                   reserva de un fuerte capturado se pierde.
 5. Producción   — towns: +comida al stock del dueño; forts: producen tropas
                   según comida disponible que se ACUMULAN en la reserva del
-                  fuerte (no salen al mapa solas).
+                  fuerte (no salen al mapa solas). El orden entre los fuertes
+                  de un jugador rota por turno, así los capturados también
+                  producen cuando la comida escasea.
 6. Recuperación — XP según ubicación, comida de los ejércitos; un ejército
                   en fuerte propio se reabastece de la reserva hasta
-                  max_army_size; los ejércitos con XP <= 0 o sin tropas se
-                  eliminan (cruz en el mapa).
+                  max_army_size y come del stock; en pueblo propio come
+                  directo del pueblo (sin stock); los ejércitos con XP <= 0
+                  o sin tropas se eliminan (cruz en el mapa).
 7. Victoria     — se evalúa la condición activa (core.victory).
 
 Dos ejércitos nunca comparten tile (ni aliados, v1): un tile ocupado
@@ -52,6 +55,9 @@ class Player:
     # Nivel de la AI (facil/medio/dificil) si is_ai; lo persiste el savegame
     # para reconstruir el AIPlayer al cargar la partida.
     ai_level: str | None = None
+    # Tropas propias perdidas en toda la partida (bajas en batalla y
+    # ejércitos disueltos); lo muestra el HUD.
+    troops_lost: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -60,6 +66,7 @@ class Player:
             "is_ai": self.is_ai,
             "food": self.food,
             "ai_level": self.ai_level,
+            "troops_lost": self.troops_lost,
         }
 
     @classmethod
@@ -198,8 +205,12 @@ class Game:
                 self.config["batalla"], self.rng,
             )
             self.last_battles.append((defender.position, result.outcome.name))
-            attacker.apply_losses(result.attacker_losses)
-            defender.apply_losses(result.defender_losses)
+            self.players[attacker.owner].troops_lost += attacker.apply_losses(
+                result.attacker_losses
+            )
+            self.players[defender.owner].troops_lost += defender.apply_losses(
+                result.defender_losses
+            )
             attacker.xp += result.attacker_xp_delta
             defender.xp += result.defender_xp_delta
             if result.outcome in ATTACKER_FALLS_BACK:
@@ -245,18 +256,28 @@ class Game:
                 self.players[town.owner].food += self.config["comida_por_town"]
         rate = self.config["tasa_produccion_fort"]
         max_reserve = self.config["max_reserva_fort"]
-        for fort in self.world.forts:
-            if fort.owner < 0:
+        for player in self.players:
+            forts = [
+                f for f in self.world.forts
+                if f.owner == player.id and not self._enemy_on(f.position, player.id)
+            ]
+            if not forts:
                 continue
-            occupant = self.army_at(fort.position)
-            if occupant is not None and occupant.owner != fort.owner:
-                continue  # un enemigo está pisando el fuerte: no produce
-            player = self.players[fort.owner]
-            troops = min(int(player.food * rate), max_reserve - fort.reserve_total)
-            if troops <= 0:
-                continue
-            self._add_to_reserve(fort, troops)
-            player.food = max(0, player.food - math.ceil(troops / rate))
+            # El orden rota por turno: si la comida no alcanza para todos,
+            # cada fuerte (incluidos los capturados) produce a su turno en
+            # vez de que el primero de la lista acapare todo el stock.
+            start = self.turn % len(forts)
+            for fort in forts[start:] + forts[:start]:
+                troops = min(int(player.food * rate), max_reserve - fort.reserve_total)
+                if troops <= 0:
+                    continue
+                self._add_to_reserve(fort, troops)
+                player.food = max(0, player.food - math.ceil(troops / rate))
+
+    def _enemy_on(self, pos: Coord, player_id: int) -> bool:
+        """True si un ejército enemigo está pisando el tile (bloquea producción)."""
+        occupant = self.army_at(pos)
+        return occupant is not None and occupant.owner != player_id
 
     def _add_to_reserve(self, fort: Fort, total: int) -> None:
         """Acumula tropas nuevas en la reserva, en partes iguales por clase."""
@@ -303,9 +324,13 @@ class Game:
                 army.xp = min(xp_max, army.xp + xp_cfg[kind])
                 if fort is not None:
                     self._resupply(fort, army)  # recarga tropas de la reserva
-                player = self.players[army.owner]
-                if player.food >= food_cfg["costo_stock_refuerzo"]:
-                    player.food -= food_cfg["costo_stock_refuerzo"]
+                    player = self.players[army.owner]
+                    if player.food >= food_cfg["costo_stock_refuerzo"]:
+                        player.food -= food_cfg["costo_stock_refuerzo"]
+                        army.food = min(100, army.food + food_cfg["refuerzo_en_base"])
+                else:
+                    # Un pueblo propio alimenta al ejército directamente, sin
+                    # depender del stock (que los fuertes suelen agotar).
                     army.food = min(100, army.food + food_cfg["refuerzo_en_base"])
             else:
                 army.xp = min(xp_max, army.xp + xp_cfg["campo"])
@@ -313,6 +338,9 @@ class Game:
 
     def _kill(self, army: Army) -> None:
         """Elimina un ejército derrotado y deja una cruz en el mapa."""
+        # Las tropas que quedaban (p. ej. al morir por XP) también cuentan
+        # como perdidas.
+        self.players[army.owner].troops_lost += army.total_troops
         self.crosses.append(army.position)
         self.armies.remove(army)
 

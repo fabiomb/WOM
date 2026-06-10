@@ -60,7 +60,8 @@ class GameScreen:
         )
         self.renderer = MapRenderer(game, Assets(tile_size), map_area)
         self.hud = Hud(
-            pygame.Rect(map_area.right, 0, theme.SIDEBAR_WIDTH, window.height)
+            pygame.Rect(map_area.right, 0, theme.SIDEBAR_WIDTH, window.height),
+            human_id=human_id,
         )
 
     @property

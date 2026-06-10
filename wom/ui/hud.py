@@ -11,9 +11,13 @@ from wom.core.worldmap import Fort
 from wom.ui import theme
 
 
+MAX_ARMY_ROWS = 8  # filas de la lista de ejércitos propios
+
+
 class Hud:
-    def __init__(self, rect: pygame.Rect):
+    def __init__(self, rect: pygame.Rect, human_id: int = 0):
         self.rect = rect
+        self.human_id = human_id
         self.title_font = pygame.font.SysFont(None, 34)
         self.font = pygame.font.SysFont(None, 22)
         self.small_font = pygame.font.SysFont(None, 18)
@@ -61,7 +65,8 @@ class Hud:
             towns = sum(1 for t in game.world.towns if t.owner == player.id)
             y = self._text(surface, player.name, x, y, self.font, color)
             y = self._text(
-                surface, f"  {len(armies)} ejércitos · {troops} tropas",
+                surface,
+                f"  {len(armies)} ejércitos · {troops} tropas · {player.troops_lost} bajas",
                 x, y, self.small_font, theme.TEXT_DIM,
             )
             y = self._text(
@@ -70,6 +75,8 @@ class Hud:
                 x, y, self.small_font, theme.TEXT_DIM,
             )
             y += 6
+
+        y = self._draw_army_list(surface, game, selected, x, y)
 
         if game.last_battles:
             y += 6
@@ -158,6 +165,31 @@ class Hud:
             )
             label = self.font.render("Fin del turno (Enter)", True, theme.TEXT)
             surface.blit(label, label.get_rect(center=self.button.center))
+
+    def _draw_army_list(
+        self, surface: pygame.Surface, game: Game, selected: Army | None, x: int, y: int
+    ) -> int:
+        """Lista de los ejércitos del jugador humano con sus tropas."""
+        armies = game.armies_of(self.human_id)
+        if not armies:
+            return y
+        y += 4
+        y = self._text(surface, "Tus ejércitos", x, y, self.font)
+        for army in armies[:MAX_ARMY_ROWS]:
+            is_selected = selected is not None and army.id == selected.id
+            color = theme.SELECTION if is_selected else theme.TEXT_DIM
+            ax, ay = army.position
+            y = self._text(
+                surface,
+                f"  #{army.id} · {army.total_troops} tropas · ({ax},{ay})",
+                x, y, self.small_font, color,
+            )
+        if len(armies) > MAX_ARMY_ROWS:
+            y = self._text(
+                surface, f"  … y {len(armies) - MAX_ARMY_ROWS} más",
+                x, y, self.small_font, theme.TEXT_DIM,
+            )
+        return y + 4
 
     def _draw_game_over(
         self, surface: pygame.Surface, game: Game, result: VictoryResult

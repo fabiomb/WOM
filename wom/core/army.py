@@ -32,11 +32,18 @@ class Army:
         present = [classes[c].velocidad for c, n in self.composition.items() if n > 0]
         return min(present) if present else 0
 
-    def apply_losses(self, losses: dict[str, int]) -> None:
-        """Descuenta bajas por clase tras una batalla, sin ir debajo de cero."""
+    def apply_losses(self, losses: dict[str, int]) -> int:
+        """Descuenta bajas por clase tras una batalla, sin ir debajo de cero.
+
+        Devuelve las bajas efectivas (para el contador de tropas perdidas
+        del jugador).
+        """
+        removed = 0
         for class_id, n in losses.items():
             current = self.composition.get(class_id, 0)
             self.composition[class_id] = max(0, current - n)
+            removed += current - self.composition[class_id]
+        return removed
 
     def to_dict(self) -> dict:
         """Serialización a dict (savegames)."""

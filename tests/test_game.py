@@ -100,6 +100,50 @@ def test_town_produce_comida():
     assert game.players[0].food == 10 + game.config["comida_por_town"]
 
 
+def test_fuertes_capturados_tambien_producen():
+    game = _make_game()
+    # P0 tiene un segundo fuerte (capturado); la comida alcanza para uno solo
+    second = Fort(position=(3, 1), owner=0)
+    game.world.forts.append(second)
+    first = game.world.forts[0]
+    for _ in range(2):
+        game.players[0].food = 2  # da para 1 tropa por turno
+        game.run_turn([])
+    # el orden rotativo le dio su turno de producción a cada fuerte
+    assert first.reserve_total > 0
+    assert second.reserve_total > 0
+
+
+def test_pueblo_propio_alimenta_al_ejercito_sin_stock():
+    game = _make_game()
+    game.world.towns.append(Town(position=(2, 2), owner=0))
+    army = game.spawn_army(0, (2, 2), {"soldado": 10})
+    army.food = 10
+    game.players[0].food = 0  # sin stock: el pueblo lo alimenta igual
+    game.run_turn([])
+    assert army.food > 10
+
+
+def test_contador_de_tropas_perdidas_en_batalla():
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 50})
+    b = game.spawn_army(1, (4, 1), {"soldado": 50})
+    game.run_turn([MoveOrder(army_id=a.id, path=((3, 1), (4, 1)))])
+    p0, p1 = game.players
+    assert p0.troops_lost >= 1 and p1.troops_lost >= 1  # toda batalla causa bajas
+    # invariante: tropas perdidas + tropas vivas = tropas iniciales
+    assert p0.troops_lost + sum(x.total_troops for x in game.armies_of(0)) == 50
+    assert p1.troops_lost + sum(x.total_troops for x in game.armies_of(1)) == 50
+
+
+def test_ejercito_disuelto_cuenta_sus_tropas_como_perdidas():
+    game = _make_game()
+    army = game.spawn_army(0, (4, 4), {"soldado": 10})
+    army.xp = 0  # muere por moral: sus 10 tropas restantes son bajas
+    game.run_turn([])
+    assert game.players[0].troops_lost == 10
+
+
 def test_reabastecimiento_en_fuerte_propio():
     game = _make_game()
     fort = game.world.forts[0]
