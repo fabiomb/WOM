@@ -187,6 +187,34 @@ def test_captura_de_fuerte_destruye_la_reserva():
     assert fort.reserve_total == 0  # la guarnición enemiga se dispersó
 
 
+def test_fusion_de_ejercitos():
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 30, "arquero": 10})
+    b = game.spawn_army(0, (3, 1), {"soldado": 20})
+    a.xp, b.xp = 100, 40
+    a.food, b.food = 100, 40
+    assert game.merge_armies(a.id, b.id)
+    assert game.army_by_id(a.id) is None  # el source se integró
+    assert game.crosses == []  # sin cruz: nadie murió
+    assert b.composition == {"soldado": 50, "arquero": 10}
+    # XP y comida: promedio ponderado por tropas (40 de a, 20 de b)
+    assert b.xp == round((100 * 40 + 40 * 20) / 60)
+    assert b.food == round((100 * 40 + 40 * 20) / 60)
+
+
+def test_fusion_invalida():
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 60})
+    far = game.spawn_army(0, (5, 1), {"soldado": 10})
+    enemy = game.spawn_army(1, (3, 1), {"soldado": 10})
+    big = game.spawn_army(0, (2, 2), {"soldado": 60})
+    assert not game.merge_armies(a.id, far.id)    # no son aledaños
+    assert not game.merge_armies(a.id, enemy.id)  # distinto dueño
+    assert not game.merge_armies(a.id, big.id)    # 120 > max_army_size
+    assert not game.merge_armies(a.id, a.id)      # consigo mismo
+    assert len(game.armies) == 4  # nada cambió
+
+
 def test_recuperacion_xp_en_fuerte_vs_campo():
     game = _make_game()
     in_fort = game.spawn_army(0, (0, 2), {"soldado": 10})

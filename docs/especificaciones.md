@@ -143,10 +143,12 @@ El modo de victoria activo se elige al crear la partida.
 
 ## 5. UI (`ui/`)
 
-- **Menú** (v1, implementado en M4): Nueva partida (nivel de AI, tamaño de mapa chico/medio/grande y condición de victoria, opciones cíclicas por click), Cargar partida (lista de saves con turno y fecha), Salir. Guardar disponible durante la partida (botón del HUD o tecla G); ESC vuelve al menú.
+- **Menú** (v1, implementado en M4): Nueva partida (nivel de AI, tamaño de mapa chico/medio/grande y condición de victoria, opciones cíclicas por click), Cargar partida (lista de saves con turno), Salir. Guardar disponible durante la partida (botón del HUD o tecla G); ESC vuelve al menú.
+- **Portada**: `data/assets/title.png` se estira a la ventana y el menú se dibuja con estilo "tinta" dentro del pergamino central (zona definida por `SCROLL_AREA` en `menu_screen.py`, como fracciones de la imagen). Si el asset no existe, el menú cae al fondo plano con el título "WOM".
 - **Vista de mapa**: tiles con sprites PNG, ejércitos como íconos con contador de tropas, banderas de color por jugador (`flag_red`/`flag_blue`/`flag` gris para neutrales), cruces donde murieron ejércitos.
 - **Sidebar**: por jugador muestra ejércitos, tropas activas, **bajas acumuladas**, fuertes, pueblos y comida; debajo, la lista "Tus ejércitos" con número, tropas y posición de cada ejército del humano (el seleccionado se resalta).
 - **Órdenes**: click en ejército → click(s) en el mapa para trazar el camino → el path se dibuja. Botón "Fin del turno".
+- **Fusión de ejércitos**: con un ejército propio seleccionado, Shift+click en otro propio en un tile aledaño abre un diálogo de confirmación; al aceptar (botón o tecla S) se fusionan en uno (`Game.merge_armies`): el seleccionado se integra al clickeado, XP y comida quedan como promedio ponderado por tropas, y la suma no puede superar `max_army_size` (si excede, se avisa y no se fusiona). N/ESC cancela.
 - **Movimiento animado**: al finalizar el turno los ejércitos se deslizan por los tiles que recorrieron (el core lo registra en `Game.last_moves`, retirada incluida), todos en simultáneo a velocidad constante. Enter/Espacio/click saltea la animación; el resto del input se bloquea mientras tanto. Los ejércitos que mueren animan su recorrido y desaparecen al final (queda la cruz); el overlay de fin de partida espera a que termine la animación del último turno.
 - **Assets placeholder**: PNG planos generados por script (`tools/gen_placeholders.py`): tiles de 64×64 px, unidades de 48×48 px, íconos de 32×32 px. El arte final reemplaza archivos con el mismo nombre y tamaño.
 

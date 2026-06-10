@@ -40,7 +40,8 @@ python -m venv .venv
 
 Click en un ejército propio para seleccionarlo y click(s) en el mapa para
 trazar su camino; click en un fuerte propio para crear ejércitos desde la
-reserva. `Enter` termina el turno, `G` guarda la partida, `ESC` vuelve al menú.
+reserva; `Shift+click` en otro ejército propio aledaño para fusionarlos en
+uno. `Enter` termina el turno, `G` guarda la partida, `ESC` vuelve al menú.
 
 ### Modo headless (sin ventana)
 

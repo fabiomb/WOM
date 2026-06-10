@@ -17,6 +17,7 @@ from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
 from wom.persistence.savegame import list_saves, save_info
 from wom.ui import theme
+from wom.ui.assets import ASSETS_DIR
 
 # Tamaños de mapa que ofrece el menú: nombre → (ancho, alto, forts, towns).
 MAP_SIZES: dict[str, tuple[int, int, int, int]] = {
@@ -28,13 +29,25 @@ AI_LEVELS = ["facil", "medio", "dificil"]
 VICTORY_MODES = [VictoryMode.TOTAL, VictoryMode.FLAGS, VictoryMode.TIME]
 VICTORY_LABELS = {
     VictoryMode.TOTAL: "conquista total",
-    VictoryMode.FLAGS: "capturar las banderas",
-    VictoryMode.TIME: "superioridad al turno límite",
+    VictoryMode.FLAGS: "capturar banderas",
+    VictoryMode.TIME: "límite de turnos",
 }
 MAX_SAVES_SHOWN = 10
 
 BUTTON_SIZE = (380, 48)
 BUTTON_GAP = 14
+
+# Portada (data/assets/title.png): se estira a la ventana y el menú se dibuja
+# dentro del pergamino central. Zona útil del pergamino como fracciones del
+# ancho/alto de la imagen (x0, y0, x1, y1). Si el asset no existe, el menú
+# cae al fondo plano de siempre.
+TITLE_IMAGE = "title.png"
+SCROLL_AREA = (0.365, 0.14, 0.615, 0.64)
+
+# "Tinta" para los botones sobre el pergamino.
+INK = (62, 40, 18)
+INK_DIM = (115, 88, 55)
+INK_HOVER = (146, 30, 18)
 
 
 @dataclass(frozen=True)
@@ -69,6 +82,10 @@ class MenuScreen:
         self.small_font = pygame.font.SysFont(None, 22)
         self._buttons: dict[str, pygame.Rect] = {}  # id → rect (del último draw)
         self._saves: list[dict] = []
+        path = ASSETS_DIR / TITLE_IMAGE
+        self.background = pygame.image.load(str(path)) if path.exists() else None
+        self._scaled_bg: pygame.Surface | None = None  # cache al tamaño de ventana
+        self._on_scroll = False  # True si se está dibujando sobre el pergamino
 
     def take_action(self) -> NewGameChoice | LoadChoice | str | None:
         """Devuelve y consume la decisión del usuario (la lee el loop de app)."""
@@ -123,88 +140,121 @@ class MenuScreen:
     # --- dibujo ----------------------------------------------------------------
 
     def draw(self, surface: pygame.Surface) -> None:
-        surface.fill(theme.BACKGROUND)
         self._buttons.clear()
-        center_x = surface.get_rect().centerx
-        title = self.title_font.render("WOM", True, theme.TEXT)
-        surface.blit(title, title.get_rect(center=(center_x, 110)))
-        subtitle = self.small_font.render(
-            "Juego de estrategia militar por turnos", True, theme.TEXT_DIM
-        )
-        surface.blit(subtitle, subtitle.get_rect(center=(center_x, 160)))
+        window = surface.get_rect()
+        if self.background is not None:
+            if self._scaled_bg is None or self._scaled_bg.get_size() != window.size:
+                self._scaled_bg = pygame.transform.smoothscale(self.background, window.size)
+            surface.blit(self._scaled_bg, (0, 0))
+            x0, y0, x1, y1 = SCROLL_AREA
+            area = pygame.Rect(
+                round(window.width * x0), round(window.height * y0),
+                round(window.width * (x1 - x0)), round(window.height * (y1 - y0)),
+            )
+            self._on_scroll = True
+        else:
+            surface.fill(theme.BACKGROUND)
+            title = self.title_font.render("WOM", True, theme.TEXT)
+            surface.blit(title, title.get_rect(center=(window.centerx, 110)))
+            subtitle = self.small_font.render(
+                "Juego de estrategia militar por turnos", True, theme.TEXT_DIM
+            )
+            surface.blit(subtitle, subtitle.get_rect(center=(window.centerx, 160)))
+            area = pygame.Rect(0, 210, 560, window.height - 270)
+            area.centerx = window.centerx
+            self._on_scroll = False
 
         if self.mode == "main":
-            self._draw_main(surface, center_x)
+            self._draw_main(surface, area)
         elif self.mode == "new":
-            self._draw_new(surface, center_x)
+            self._draw_new(surface, area)
         else:
-            self._draw_load(surface, center_x)
+            self._draw_load(surface, area)
 
-    def _draw_main(self, surface: pygame.Surface, center_x: int) -> None:
-        y = 260
-        for bid, label in (
+    def _draw_main(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        rows = (
             ("new", "Nueva partida"),
             ("load", "Cargar partida"),
             ("quit", "Salir"),
-        ):
-            y = self._button(surface, bid, label, center_x, y)
+        )
+        height = len(rows) * BUTTON_SIZE[1] + (len(rows) - 1) * BUTTON_GAP
+        y = area.y + max(0, (area.height - height) // 2)
+        for bid, label in rows:
+            y = self._button(surface, bid, label, area, y)
 
-    def _draw_new(self, surface: pygame.Surface, center_x: int) -> None:
-        y = 240
+    def _draw_new(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        y = area.y + 6
         width, height, forts, towns = MAP_SIZES[self.map_size]
         options = (
             ("ai_level", f"Nivel de la AI:  {self.ai_level}"),
-            ("map_size", f"Mapa:  {self.map_size} ({width}x{height}, "
-                         f"{forts} fuertes, {towns} pueblos)"),
+            ("map_size", f"Mapa:  {self.map_size} ({width}x{height})"),
             ("victory", f"Victoria:  {VICTORY_LABELS[self.victory_mode]}"),
         )
         for bid, label in options:
-            y = self._button(surface, bid, label, center_x, y, option_style=True)
-        hint = self.small_font.render("(click para cambiar cada opción)", True, theme.TEXT_DIM)
-        surface.blit(hint, hint.get_rect(center=(center_x, y + 6)))
-        y += 34
-        y = self._button(surface, "start", "Comenzar", center_x, y)
-        self._button(surface, "back", "Volver (ESC)", center_x, y, option_style=True)
+            y = self._button(surface, bid, label, area, y, option_style=True)
+        hint_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        hint = self.small_font.render("(click para cambiar cada opción)", True, hint_color)
+        surface.blit(hint, hint.get_rect(center=(area.centerx, y + 6)))
+        y += 30
+        y = self._button(surface, "start", "Comenzar", area, y)
+        self._button(surface, "back", "Volver (ESC)", area, y, option_style=True)
 
-    def _draw_load(self, surface: pygame.Surface, center_x: int) -> None:
-        y = 220
+    def _draw_load(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        y = area.y + 4
         if not self._saves:
-            label = self.font.render("No hay partidas guardadas", True, theme.TEXT_DIM)
-            surface.blit(label, label.get_rect(center=(center_x, y + 20)))
+            color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+            label = self.font.render("No hay partidas guardadas", True, color)
+            surface.blit(label, label.get_rect(center=(area.centerx, y + 20)))
             y += 60
-        for info in self._saves:
-            text = f"{info['name']}  —  turno {info['turn']}  —  {info['saved_at']}"
+        # Solo las entradas que entran en el área (el pergamino tiene su altura).
+        row_height = (34 if self._on_scroll else 40) + 8
+        max_rows = max(1, (area.height - BUTTON_SIZE[1] - 20) // row_height)
+        for info in self._saves[:max_rows]:
+            text = f"{info['name']}  —  turno {info['turn']}"
             y = self._button(
-                surface, f"save:{info['path']}", text, center_x, y, option_style=True
+                surface, f"save:{info['path']}", text, area, y, option_style=True
             )
-        self._button(surface, "back", "Volver (ESC)", center_x, y + 10)
+        self._button(surface, "back", "Volver (ESC)", area, y + 8)
 
     def _button(
         self,
         surface: pygame.Surface,
         bid: str,
         label: str,
-        center_x: int,
+        area: pygame.Rect,
         y: int,
         option_style: bool = False,
     ) -> int:
-        """Dibuja un botón centrado, lo registra para hit-testing; devuelve el y siguiente."""
+        """Dibuja un botón centrado en el área, lo registra para hit-testing;
+        devuelve el y siguiente. Sobre el pergamino el estilo es de "tinta"
+        (texto oscuro, realce translúcido al pasar el mouse)."""
         rect = pygame.Rect(0, 0, *BUTTON_SIZE)
         if option_style:
             rect.width = 520
             rect.height = 40
-        rect.centerx = center_x
+        if self._on_scroll:
+            rect.width = area.width - 8
+            rect.height = 34 if option_style else 42
+        rect.centerx = area.centerx
         rect.y = y
         over = rect.collidepoint(pygame.mouse.get_pos())
-        if option_style:
-            bg = (50, 56, 62) if not over else (70, 78, 86)
+        font = self.small_font if (option_style and self._on_scroll) else self.font
+        if self._on_scroll:
+            if over:
+                highlight = pygame.Surface(rect.size, pygame.SRCALPHA)
+                highlight.fill((90, 55, 20, 45))
+                surface.blit(highlight, rect.topleft)
+            text = font.render(label, True, INK_HOVER if over else INK)
         else:
-            bg = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
-        pygame.draw.rect(surface, bg, rect, border_radius=8)
-        text = self.font.render(label, True, theme.TEXT)
+            if option_style:
+                bg = (50, 56, 62) if not over else (70, 78, 86)
+            else:
+                bg = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
+            pygame.draw.rect(surface, bg, rect, border_radius=8)
+            text = font.render(label, True, theme.TEXT)
         surface.blit(text, text.get_rect(center=rect.center))
         self._buttons[bid] = rect
-        return rect.bottom + BUTTON_GAP
+        return rect.bottom + (8 if self._on_scroll else BUTTON_GAP)
 
 
 def _next(values: list, current) -> object:

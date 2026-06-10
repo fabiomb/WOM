@@ -346,6 +346,37 @@ class Game:
 
     # --- consultas y helpers usados por UI, AI y persistencia -------------
 
+    def merge_armies(self, source_id: int, target_id: int) -> bool:
+        """Fusiona el ejército `source` dentro de `target` (acción del jugador,
+        fuera de las fases del turno).
+
+        Requiere mismo dueño, tiles aledaños y que la suma no supere
+        max_army_size. El target absorbe la composición; XP y comida quedan
+        como promedio ponderado por tropas. El source desaparece sin dejar
+        cruz (no murió: se integró). Devuelve False si no se pudo.
+        """
+        source = self.army_by_id(source_id)
+        target = self.army_by_id(target_id)
+        if source is None or target is None or source is target:
+            return False
+        if source.owner != target.owner:
+            return False
+        if not _adjacent(source.position, target.position):
+            return False
+        total = source.total_troops + target.total_troops
+        if total == 0 or total > self.config["max_army_size"]:
+            return False
+        target.xp = round(
+            (target.xp * target.total_troops + source.xp * source.total_troops) / total
+        )
+        target.food = round(
+            (target.food * target.total_troops + source.food * source.total_troops) / total
+        )
+        for class_id, count in source.composition.items():
+            target.composition[class_id] = target.composition.get(class_id, 0) + count
+        self.armies.remove(source)
+        return True
+
     def spawn_army(self, owner: int, position: Coord, composition: dict[str, int]) -> Army:
         army = Army(
             id=self.next_army_id,

@@ -140,6 +140,43 @@ def test_animacion_de_movimiento(screen, game_screen):
     assert game_screen.animation is None
 
 
+def test_fusion_por_shift_click(screen, game_screen):
+    game = game_screen.game
+    a = game.armies_of(0)[0]
+    adjacent = next(
+        pos for pos in game.world.neighbors(a.position) if game.army_at(pos) is None
+    )
+    b = game.spawn_army(0, adjacent, {"soldado": 10})
+    troops_before = a.total_troops + b.total_troops
+
+    _click(game_screen, game_screen.renderer.tile_center(a.position))  # selecciona a
+    pygame.key.set_mods(pygame.KMOD_SHIFT)
+    try:
+        _click(game_screen, game_screen.renderer.tile_center(b.position))
+    finally:
+        pygame.key.set_mods(0)
+    assert game_screen.pending_merge == (a.id, b.id)
+    game_screen.draw(screen)  # el diálogo modal no debe romper el dibujo
+
+    # con el diálogo abierto, ESC cancela (no vuelve al menú)
+    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE}))
+    assert game_screen.pending_merge is None and not game_screen.wants_menu
+
+    # de nuevo, ahora confirmando con la tecla S
+    pygame.key.set_mods(pygame.KMOD_SHIFT)
+    try:
+        _click(game_screen, game_screen.renderer.tile_center(b.position))
+    finally:
+        pygame.key.set_mods(0)
+    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_s}))
+    assert game.army_by_id(a.id) is None  # a se integró en b
+    merged = game.army_by_id(b.id)
+    assert merged.total_troops == troops_before
+    assert game_screen.selected_id == b.id
+    assert "fusionados" in game_screen.notice
+    game_screen.draw(screen)
+
+
 def test_guardar_desde_la_partida(screen, game_screen, tmp_path, monkeypatch):
     monkeypatch.setattr(savegame, "SAVES_DIR", tmp_path)
     game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_g}))
