@@ -49,7 +49,12 @@ python -m venv .venv
 Click en un ejército propio para seleccionarlo y click(s) en el mapa para
 trazar su camino; click en un fuerte propio para crear ejércitos desde la
 reserva; `Shift+click` en otro ejército propio aledaño para fusionarlos en
-uno. `Enter` termina el turno, `G` guarda la partida, `ESC` vuelve al menú.
+uno. `Enter` termina el turno, `G` guarda la partida, `M` abre el reproductor
+de música, `ESC` vuelve al menú.
+
+La banda de sonido suena desde `data/music` (un tema al azar al arrancar);
+en **Opciones** se configura on/off, volumen, carpeta y orden
+aleatorio/secuencial — todo queda guardado en `settings.json`.
 
 ### Modo headless (sin ventana)
 

@@ -188,8 +188,19 @@ def test_guardar_desde_la_partida(screen, game_screen, tmp_path, monkeypatch):
     assert loaded.to_dict() == game_screen.game.to_dict()
 
 
-def test_esc_vuelve_al_menu(game_screen):
-    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE}))
+def test_esc_pide_confirmacion_antes_de_salir(screen, game_screen):
+    esc = pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE})
+    game_screen.handle_event(esc)
+    assert game_screen.pending_quit and not game_screen.wants_menu
+    game_screen.draw(screen)  # el diálogo no debe romper el dibujo
+
+    # N (o ESC de nuevo) cancela y la partida sigue
+    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_n}))
+    assert not game_screen.pending_quit and not game_screen.wants_menu
+
+    # ESC y confirmar con S: ahora sí vuelve al menú
+    game_screen.handle_event(esc)
+    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_s}))
     assert game_screen.wants_menu
 
 
@@ -226,6 +237,73 @@ def test_menu_cargar_partida(screen, tmp_path, monkeypatch):
     _click_menu(menu, f"save:{path}")
     action = menu.take_action()
     assert isinstance(action, LoadChoice) and action.path == path
+
+
+def test_menu_opciones(screen, tmp_path):
+    from wom.persistence.settings import Settings, load_settings
+    from wom.ui.music import MusicPlayer
+
+    player = MusicPlayer(
+        settings=Settings(music_enabled=False, music_folder=str(tmp_path)),
+        settings_path=tmp_path / "settings.json",
+    )
+    menu = MenuScreen(music=player)
+    menu.draw(screen)
+    _click_menu(menu, "options")
+    assert menu.mode == "options"
+    menu.draw(screen)
+
+    _click_menu(menu, "music_volume")  # 70% → 80%
+    assert player.settings.music_volume == 0.8
+    _click_menu(menu, "music_order")  # aleatorio → secuencial
+    assert player.settings.music_shuffle is False
+    menu.draw(screen)
+
+    # editar la carpeta: click, borrar un caracter, escribir otro, Enter
+    _click_menu(menu, "music_folder")
+    for key, unicode in (
+        (pygame.K_BACKSPACE, "\b"), (pygame.K_a, "a"), (pygame.K_RETURN, "\r"),
+    ):
+        menu.handle_event(
+            pygame.event.Event(pygame.KEYDOWN, {"key": key, "unicode": unicode})
+        )
+    assert player.settings.music_folder == str(tmp_path)[:-1] + "a"
+
+    # opciones de video: la resolución cicla y el maximizado conmuta
+    menu.draw(screen)
+    _click_menu(menu, "video_res")  # 1280x720 → 1600x900
+    assert player.settings.video_resolution == "1600x900"
+    _click_menu(menu, "video_max")
+    assert player.settings.video_maximized is True
+    menu.draw(screen)
+
+    saved = load_settings(tmp_path / "settings.json")  # todo quedó persistido
+    assert saved.music_volume == 0.8 and saved.music_shuffle is False
+    assert saved.video_resolution == "1600x900" and saved.video_maximized is True
+
+
+def test_reproductor_modal_con_m(screen, tmp_path):
+    from wom.persistence.settings import Settings
+    from wom.ui.music import MusicPlayer
+    from wom.ui.music_overlay import MusicOverlay
+
+    player = MusicPlayer(
+        settings=Settings(music_folder=str(tmp_path)),
+        settings_path=tmp_path / "s.json",
+    )
+    overlay = MusicOverlay(player)
+    key_m = pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_m})
+    assert overlay.handle_event(key_m) and overlay.visible
+    overlay.draw(screen)  # carpeta vacía: dibuja el aviso sin romper
+
+    # mientras está abierto es modal: consume teclado y mouse
+    assert overlay.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_SPACE}))
+    click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (0, 0), "button": 1})
+    assert overlay.handle_event(click)
+
+    overlay.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE}))
+    assert not overlay.visible
+    assert not overlay.handle_event(click)  # cerrado: deja pasar el input
 
 
 def test_menu_esc_retrocede_y_sale(screen):

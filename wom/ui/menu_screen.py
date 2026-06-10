@@ -1,9 +1,13 @@
-"""Menú principal: nueva partida (con parámetros), cargar partida, salir.
+"""Menú principal: nueva partida (con parámetros), cargar, opciones, salir.
 
 La pantalla expone su decisión en `action`: None mientras el usuario navega,
 o un NewGameChoice / LoadChoice / "quit" que el loop de la app consume con
 `take_action()`. ESC retrocede de un submenú al menú principal; en el menú
 principal equivale a Salir.
+
+Opciones configura la música (on/off, volumen, carpeta, orden) a través del
+MusicPlayer que le pasa la app; cada cambio se aplica y persiste al instante
+(settings.json). La carpeta se edita escribiendo en el propio botón.
 """
 
 from __future__ import annotations
@@ -16,8 +20,11 @@ import pygame
 from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
 from wom.persistence.savegame import list_saves, save_info
+from wom.persistence.settings import Settings
 from wom.ui import theme
 from wom.ui.assets import ASSETS_DIR
+from wom.ui.music import MusicPlayer
+from wom.ui.video import RESOLUTIONS, apply_video_settings
 
 # Tamaños de mapa que ofrece el menú: nombre → (ancho, alto, forts, towns).
 MAP_SIZES: dict[str, tuple[int, int, int, int]] = {
@@ -70,7 +77,14 @@ class LoadChoice:
 class MenuScreen:
     """Menú con tres modos internos: main, new (opciones) y load (saves)."""
 
-    def __init__(self, default_ai_level: str = "medio", default_seed: int | None = None):
+    def __init__(
+        self,
+        default_ai_level: str = "medio",
+        default_seed: int | None = None,
+        music: MusicPlayer | None = None,
+    ):
+        self.music = music  # None en tests sin audio: Opciones queda inerte
+        self._editing_folder: str | None = None  # buffer mientras se escribe
         self.mode = "main"
         self.action: NewGameChoice | LoadChoice | str | None = None
         self.ai_level = default_ai_level if default_ai_level in AI_LEVELS else "medio"
@@ -95,6 +109,9 @@ class MenuScreen:
     # --- input ---------------------------------------------------------------
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if self._editing_folder is not None and event.type == pygame.KEYDOWN:
+            self._edit_folder_key(event)
+            return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             if self.mode == "main":
                 self.action = "quit"
@@ -102,6 +119,19 @@ class MenuScreen:
                 self.mode = "main"
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self._click(event.pos)
+
+    def _edit_folder_key(self, event: pygame.event.Event) -> None:
+        """Edición de la carpeta de música escribiendo sobre el botón."""
+        if event.key == pygame.K_RETURN:
+            if self.music is not None:
+                self.music.set_folder(self._editing_folder)
+            self._editing_folder = None
+        elif event.key == pygame.K_ESCAPE:
+            self._editing_folder = None  # cancela sin aplicar
+        elif event.key == pygame.K_BACKSPACE:
+            self._editing_folder = self._editing_folder[:-1]
+        elif event.unicode and event.unicode.isprintable():
+            self._editing_folder += event.unicode
 
     def _click(self, point: tuple[int, int]) -> None:
         hit = next(
@@ -116,6 +146,8 @@ class MenuScreen:
             elif hit == "load":
                 self._saves = [save_info(p) | {"path": p} for p in list_saves()[:MAX_SAVES_SHOWN]]
                 self.mode = "load"
+            elif hit == "options":
+                self.mode = "options"
             elif hit == "quit":
                 self.action = "quit"
         elif self.mode == "new":
@@ -136,6 +168,37 @@ class MenuScreen:
                 self.mode = "main"
             elif hit.startswith("save:"):
                 self.action = LoadChoice(Path(hit[len("save:"):]))
+        elif self.mode == "options":
+            self._click_option(hit)
+
+    def _click_option(self, hit: str) -> None:
+        if hit == "back":
+            self.mode = "main"
+            return
+        if self.music is None:
+            return  # sin reproductor (tests headless): las opciones no aplican
+        settings = self.music.settings
+        if hit == "music_toggle":
+            self.music.set_enabled(not settings.music_enabled)
+        elif hit == "music_volume":
+            # cíclico de a 10%: ...90% → 100% → 0%
+            new = settings.music_volume + 0.1
+            self.music.set_volume(0.0 if new > 1.001 else new)
+        elif hit == "music_folder":
+            self._editing_folder = settings.music_folder
+        elif hit == "music_order":
+            self.music.set_shuffle(not settings.music_shuffle)
+        elif hit == "video_res":
+            current = settings.video_resolution
+            settings.video_resolution = (
+                _next(RESOLUTIONS, current) if current in RESOLUTIONS else RESOLUTIONS[0]
+            )
+            self.music.save()
+            apply_video_settings(settings)  # se ve el cambio al instante
+        elif hit == "video_max":
+            settings.video_maximized = not settings.video_maximized
+            self.music.save()
+            apply_video_settings(settings)
 
     # --- dibujo ----------------------------------------------------------------
 
@@ -168,6 +231,8 @@ class MenuScreen:
             self._draw_main(surface, area)
         elif self.mode == "new":
             self._draw_new(surface, area)
+        elif self.mode == "options":
+            self._draw_options(surface, area)
         else:
             self._draw_load(surface, area)
 
@@ -175,6 +240,7 @@ class MenuScreen:
         rows = (
             ("new", "Nueva partida"),
             ("load", "Cargar partida"),
+            ("options", "Opciones"),
             ("quit", "Salir"),
         )
         height = len(rows) * BUTTON_SIZE[1] + (len(rows) - 1) * BUTTON_GAP
@@ -198,6 +264,35 @@ class MenuScreen:
         y += 30
         y = self._button(surface, "start", "Comenzar", area, y)
         self._button(surface, "back", "Volver (ESC)", area, y, option_style=True)
+
+    def _draw_options(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        settings = self.music.settings if self.music is not None else Settings()
+        if self._editing_folder is not None:
+            folder_label = f"Carpeta:  {self._editing_folder}_"
+        else:
+            folder_label = f"Carpeta:  {settings.music_folder}"
+        rows = (
+            ("music_toggle", f"Música:  {'sí' if settings.music_enabled else 'no'}"),
+            ("music_volume", f"Volumen:  {round(settings.music_volume * 100)}%"),
+            ("music_folder", folder_label),
+            ("music_order",
+             f"Orden:  {'aleatorio' if settings.music_shuffle else 'secuencial'}"),
+            ("video_res", f"Resolución:  {settings.video_resolution}"),
+            ("video_max",
+             f"Iniciar maximizado:  {'sí' if settings.video_maximized else 'no'}"),
+        )
+        y = area.y + 6
+        for bid, label in rows:
+            y = self._button(surface, bid, label, area, y, option_style=True)
+        hint_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        hint_text = (
+            "(escribí la ruta y Enter)" if self._editing_folder is not None
+            else "(click para cambiar · M abre el reproductor)"
+        )
+        hint = self.small_font.render(hint_text, True, hint_color)
+        surface.blit(hint, hint.get_rect(center=(area.centerx, y + 6)))
+        y += 30
+        self._button(surface, "back", "Volver (ESC)", area, y)
 
     def _draw_load(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         y = area.y + 4

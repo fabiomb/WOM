@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 saves/*.json
+settings.json
 build/
 dist/
 *.spec

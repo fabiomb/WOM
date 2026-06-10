@@ -14,7 +14,8 @@ Interacción:
   movimiento resultante se anima de forma fluida (Enter/Espacio/click la
   saltea); el resto del input queda bloqueado mientras tanto.
 - Botón "Guardar" o tecla G: guarda la partida en saves/ con timestamp.
-- ESC: vuelve al menú principal (la partida no guardada se pierde).
+- ESC: pide confirmación antes de volver al menú (la partida no guardada se
+  pierde); con la partida ya terminada sale directo.
 """
 
 from __future__ import annotations
@@ -60,7 +61,9 @@ class GameScreen:
         # Fusión pendiente de confirmar: (source_id, target_id). Mientras
         # exista se muestra el diálogo modal y se bloquea el resto del input.
         self.pending_merge: tuple[int, int] | None = None
-        self._merge_buttons: dict[str, pygame.Rect] = {}
+        # Salida al menú pendiente de confirmar (ESC en plena partida).
+        self.pending_quit = False
+        self._dialog_buttons: dict[str, pygame.Rect] = {}
 
         window = pygame.display.get_surface().get_rect()
         map_area = pygame.Rect(
@@ -92,10 +95,25 @@ class GameScreen:
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if self.pending_merge is not None:
-            self._handle_merge_dialog(event)
+            choice = self._confirm_choice(event)
+            if choice is True:
+                self._confirm_merge()
+            elif choice is False:
+                self.pending_merge = None
+            return
+        if self.pending_quit:
+            choice = self._confirm_choice(event)
+            if choice is True:
+                self.wants_menu = True
+                self.pending_quit = False
+            elif choice is False:
+                self.pending_quit = False
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            self.wants_menu = True
+            if self.game_over:
+                self.wants_menu = True  # partida terminada: sale directo
+            else:
+                self.pending_quit = True  # en juego: pide confirmación
             return
         if self.animating:
             # Mientras anima solo se acepta saltearla; el estado ya es el final.
@@ -175,20 +193,25 @@ class GameScreen:
             return
         self.pending_merge = (selected.id, occupant.id)
 
-    def _handle_merge_dialog(self, event: pygame.event.Event) -> None:
-        """Input del diálogo de confirmación de fusión (modal)."""
+    def _confirm_choice(self, event: pygame.event.Event) -> bool | None:
+        """Input común de los diálogos de confirmación (modales).
+
+        True = aceptó (S/Enter o botón sí), False = canceló (N/ESC o botón
+        no), None = el evento no decide nada.
+        """
         if event.type == pygame.KEYDOWN:
             if event.key in (pygame.K_s, pygame.K_RETURN):
-                self._confirm_merge()
-            elif event.key in (pygame.K_n, pygame.K_ESCAPE):
-                self.pending_merge = None
+                return True
+            if event.key in (pygame.K_n, pygame.K_ESCAPE):
+                return False
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            yes = self._merge_buttons.get("yes")
-            no = self._merge_buttons.get("no")
+            yes = self._dialog_buttons.get("yes")
+            no = self._dialog_buttons.get("no")
             if yes is not None and yes.collidepoint(event.pos):
-                self._confirm_merge()
-            elif no is not None and no.collidepoint(event.pos):
-                self.pending_merge = None
+                return True
+            if no is not None and no.collidepoint(event.pos):
+                return False
+        return None
 
     def _confirm_merge(self) -> None:
         source_id, target_id = self.pending_merge
@@ -291,14 +314,31 @@ class GameScreen:
         )
         if self.pending_merge is not None:
             self._draw_merge_dialog(surface)
+        elif self.pending_quit:
+            self._draw_confirm_dialog(
+                surface, "¿Salir al menú?",
+                "La partida no guardada se pierde", "Salir (S)",
+            )
 
     def _draw_merge_dialog(self, surface: pygame.Surface) -> None:
-        """Diálogo modal centrado: confirmar la fusión de dos ejércitos."""
+        """Diálogo modal: confirmar la fusión de dos ejércitos."""
         source = self.game.army_by_id(self.pending_merge[0])
         target = self.game.army_by_id(self.pending_merge[1])
         if source is None or target is None:  # alguno desapareció: cancelar
             self.pending_merge = None
             return
+        self._draw_confirm_dialog(
+            surface, "¿Fusionar los ejércitos?",
+            f"#{source.id} ({source.total_troops} tropas) + "
+            f"#{target.id} ({target.total_troops} tropas) = "
+            f"{source.total_troops + target.total_troops} tropas",
+            "Fusionar (S)",
+        )
+
+    def _draw_confirm_dialog(
+        self, surface: pygame.Surface, title: str, detail: str, yes_label: str
+    ) -> None:
+        """Diálogo modal centrado de confirmación (sí/no)."""
         overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
         overlay.fill(theme.GAMEOVER_BG)
         surface.blit(overlay, (0, 0))
@@ -308,25 +348,20 @@ class GameScreen:
         pygame.draw.rect(surface, theme.SIDEBAR_BG, box, border_radius=8)
         pygame.draw.rect(surface, theme.SELECTION, box, 2, border_radius=8)
 
-        title = self.hud.font.render("¿Fusionar los ejércitos?", True, theme.TEXT)
-        detail = self.hud.small_font.render(
-            f"#{source.id} ({source.total_troops} tropas) + "
-            f"#{target.id} ({target.total_troops} tropas) = "
-            f"{source.total_troops + target.total_troops} tropas",
-            True, theme.TEXT_DIM,
-        )
-        surface.blit(title, title.get_rect(midtop=(box.centerx, box.y + 18)))
-        surface.blit(detail, detail.get_rect(midtop=(box.centerx, box.y + 50)))
+        title_text = self.hud.font.render(title, True, theme.TEXT)
+        detail_text = self.hud.small_font.render(detail, True, theme.TEXT_DIM)
+        surface.blit(title_text, title_text.get_rect(midtop=(box.centerx, box.y + 18)))
+        surface.blit(detail_text, detail_text.get_rect(midtop=(box.centerx, box.y + 50)))
 
         yes = pygame.Rect(box.x + 30, box.bottom - 56, 180, 38)
         no = pygame.Rect(box.right - 210, box.bottom - 56, 180, 38)
         mouse = pygame.mouse.get_pos()
         for rect, text, base, hover in (
-            (yes, "Fusionar (S)", theme.BUTTON_BG, theme.BUTTON_BG_OVER),
+            (yes, yes_label, theme.BUTTON_BG, theme.BUTTON_BG_OVER),
             (no, "Cancelar (N)", (50, 56, 62), (70, 78, 86)),
         ):
             color = hover if rect.collidepoint(mouse) else base
             pygame.draw.rect(surface, color, rect, border_radius=6)
             label = self.hud.font.render(text, True, theme.TEXT)
             surface.blit(label, label.get_rect(center=rect.center))
-        self._merge_buttons = {"yes": yes, "no": no}
+        self._dialog_buttons = {"yes": yes, "no": no}
