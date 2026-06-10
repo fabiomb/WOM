@@ -25,7 +25,9 @@ from wom.headless import run_headless  # noqa: E402
 DEFAULT_PAIRS = ["facil:medio", "medio:dificil", "facil:dificil"]
 
 
-def simulate_pair(level_a: str, level_b: str, games: int, base_seed: int) -> None:
+def simulate_pair(
+    level_a: str, level_b: str, games: int, base_seed: int, detail: bool = False
+) -> None:
     wins: Counter[str] = Counter()
     turns_total = 0
     start = time.time()
@@ -38,6 +40,22 @@ def simulate_pair(level_a: str, level_b: str, games: int, base_seed: int) -> Non
         winner = levels[result.winner] if result.winner is not None else "empate"
         wins[winner] += 1
         turns_total += game.turn
+        if detail:
+            stats = []
+            for player in game.players:
+                troops = sum(a.total_troops for a in game.armies_of(player.id))
+                territory = sum(
+                    1 for s in (*game.world.forts, *game.world.towns)
+                    if s.owner == player.id
+                )
+                stats.append(
+                    f"{levels[player.id]}: {troops}trp {territory}ter"
+                )
+            mode = result.mode.value if result.mode else "?"
+            print(
+                f"  seed {base_seed + i}: gana {winner:<8} por {mode:<6} "
+                f"t{game.turn:<3} [{' | '.join(stats)}]"
+            )
     elapsed = time.time() - start
     print(f"\n{level_a} vs {level_b}  ({games} partidas, {elapsed:.1f}s)")
     for level in (level_a, level_b, "empate"):
@@ -54,10 +72,13 @@ def main() -> None:
         "--pairs", nargs="*", default=DEFAULT_PAIRS,
         help="Cruces nivel:nivel (default: los tres)",
     )
+    parser.add_argument(
+        "--detail", action="store_true", help="Imprime el resultado de cada partida"
+    )
     args = parser.parse_args()
     for pair in args.pairs:
         level_a, level_b = pair.split(":")
-        simulate_pair(level_a, level_b, args.games, args.seed)
+        simulate_pair(level_a, level_b, args.games, args.seed, detail=args.detail)
 
 
 if __name__ == "__main__":

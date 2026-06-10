@@ -130,12 +130,15 @@ El modo de victoria activo se elige al crear la partida.
 ## 4. AI (`ai/`)
 
 - Interfaz: `AIPlayer.decide_orders(game_state) -> list[Order]`. Misma API que el jugador humano ⇒ intercambiables, y AI vs AI para testing.
+- **Motor de scoring de objetivos** (un solo código para los tres niveles): para cada ejército se puntúan los objetivos posibles — capturar fort/town, atacar (solo con ventaja ≥ `umbral_ataque`), defender fuerte amenazado, reabastecerse (tropas o comida) — con `score = valor / (1 + distancia / horizonte)`, y se elige el mejor.
 - **Tres niveles** (`data/config/ai.json`): cada nivel es un set de pesos/parámetros, no código distinto:
-  - `facil`: horizonte 1 turno, ignora comida, agresividad fija.
-  - `medio`: evalúa distancias (Dijkstra sobre costos de terreno), defiende forts, ataca con ventaja numérica.
-  - `dificil`: además gestiona economía (comida/producción), agrupa ejércitos, reacciona a movimientos del jugador (memoria de posiciones vistas).
-- Parámetros ajustables documentados: `agresividad`, `peso_economia`, `peso_defensa`, `horizonte`, `umbral_ataque` (ratio de fuerza mínimo para atacar).
+  - `facil`: horizonte 1 (solo ve lo inmediato), ignora la economía, ataca casi siempre (umbral 0.8).
+  - `medio`: evalúa distancias, defiende fuertes, ataca con ventaja numérica (umbral 1.1).
+  - `dificil`: además activa tres capacidades exclusivas: `agrupa` (fuego concentrado: ataca si la fuerza combinada de los ejércitos cercanos supera el umbral), `coordina` (reparte objetivos de captura entre ejércitos en vez de amontonarlos) y `evita_peligro` (el ruteo rodea las zonas de enemigos más fuertes en vez de chocar de frente en batallas parejas decididas por el azar).
+- Parámetros ajustables documentados: `agresividad`, `peso_economia`, `peso_defensa`, `horizonte`, `umbral_ataque`, `umbral_crear_ejercito`, `agrupa`, `coordina`, `evita_peligro`.
+- La memoria de amenazas (posición previa de los enemigos respecto de los fuertes propios) sube la urgencia de defensa cuando un enemigo se acerca: la AI reacciona al movimiento del jugador.
 - Cada decisión de la AI puede loguearse con su justificación (`--debug-ai`) para cumplir el requisito de "perfectamente documentada para mejorar y modificar".
+- **Balance validado por simulación masiva** (`tools/simulate.py`): partidas AI vs AI con lados alternados. Resultado actual: medio > facil (~63%), dificil > medio (~60%), dificil > facil (~67%).
 
 ## 5. UI (`ui/`)
 

@@ -31,6 +31,12 @@ mismo turno: los ejércitos se reparten el mapa en vez de amontonarse sobre
 el mismo objetivo (los ataques sí se comparten: eso es el fuego
 concentrado de `agrupa`).
 
+Con `evita_peligro` activo (nivel difícil), el ruteo penaliza los tiles
+cercanos a ejércitos enemigos más fuertes (DANGER_RADIUS/DANGER_COST):
+en vez de chocar de frente en batallas parejas — que el azar decide — el
+ejército las rodea y solo pelea cuando tiene ventaja. Es la maniobra que
+le permite reaccionar a los movimientos del jugador.
+
 `horizonte` regula cuánto pesa la distancia: el nivel fácil (horizonte 1)
 solo ve lo inmediato; el difícil (horizonte 5) persigue objetivos
 estratégicos lejanos.
@@ -64,6 +70,8 @@ APPROACH_BOOST = 1.5   # urgencia extra si la amenaza se está acercando
 DAMAGED_FRACTION = 0.5  # debajo de esta fracción de tropas, considerar reabastecer
 FOOD_LOW = 40          # debajo de esta comida, buscar dónde alimentarse
 GROUP_RADIUS = 6       # radio Manhattan del fuego concentrado (niveles con `agrupa`)
+DANGER_RADIUS = 2      # radio Manhattan de la zona de peligro de un enemigo fuerte
+DANGER_COST = 10.0     # costo extra por tile peligroso (fuerza el rodeo)
 
 
 class AIPlayer:
@@ -129,7 +137,14 @@ class AIPlayer:
         my_strengths: list[tuple[Army, float]],
         claimed: set[Coord],
     ) -> Order | None:
-        dist, prev = dijkstra(game.world, army.position, game.config["costo_terreno"])
+        danger = (
+            self._danger_map(game, army, enemies, my_strengths)
+            if self.params.get("evita_peligro", False)
+            else None
+        )
+        dist, prev = dijkstra(
+            game.world, army.position, game.config["costo_terreno"], extra_cost=danger
+        )
         candidates = (
             self._capture_candidates(game, dist)
             + self._attack_candidates(game, army, enemies, dist, my_strengths)
@@ -235,25 +250,72 @@ class AIPlayer:
     def _resupply_candidates(
         self, game: Game, army: Army, dist: dict[Coord, float]
     ) -> list[tuple[float, Coord, str]]:
-        if army.total_troops >= game.config["max_army_size"] * DAMAGED_FRACTION:
+        damaged = army.total_troops < game.config["max_army_size"] * DAMAGED_FRACTION
+        hungry = army.food < FOOD_LOW
+        if not damaged and not hungry:
             return []
         economy = self.params["peso_economia"]
+        value = VALUE_RESUPPLY * (0.3 + economy)
         candidates = []
         for fort in game.world.forts:
-            if (
-                fort.owner == self.player_id
-                and fort.reserve_total > 0
-                and fort.position in dist
-            ):
-                value = VALUE_RESUPPLY * (0.3 + economy)
+            if fort.owner != self.player_id or fort.position not in dist:
+                continue
+            # Recuperar tropas requiere reserva; recuperar comida, solo el fuerte.
+            if (damaged and fort.reserve_total > 0) or hungry:
                 candidates.append(
                     (self._discount(value, dist[fort.position]), fort.position, "reabastecer")
                 )
+        if hungry:
+            for town in game.world.towns:
+                if town.owner == self.player_id and town.position in dist:
+                    candidates.append(
+                        (self._discount(value, dist[town.position]), town.position, "alimentar")
+                    )
         return candidates
 
     def _discount(self, value: float, distance: float) -> float:
         """Descuenta el valor por distancia según el horizonte del nivel."""
         return value / (1.0 + distance / self.params["horizonte"])
+
+    def _danger_map(
+        self,
+        game: Game,
+        army: Army,
+        enemies: list[Army],
+        my_strengths: list[tuple[Army, float]],
+    ) -> dict[Coord, float]:
+        """Costo extra alrededor de cada enemigo que no podemos vencer.
+
+        Usa el mismo criterio que el ataque: si yo (o el grupo cercano, con
+        `agrupa`) supero el umbral contra ese enemigo, no es peligro sino
+        objetivo. El tile del enemigo no se penaliza con infinito: si el
+        único camino pasa por ahí, la batalla puede valer la pena igual.
+        """
+        my_strength = max(_strength(army, game.classes), 1.0)
+        threshold = self.params["umbral_ataque"]
+        grouping = self.params.get("agrupa", False)
+        danger: dict[Coord, float] = {}
+        for enemy in enemies:
+            enemy_strength = max(_strength(enemy, game.classes), 1.0)
+            if my_strength / enemy_strength >= threshold:
+                continue  # más débil que yo: no es peligro, es objetivo
+            if grouping:
+                local_strength = sum(
+                    s for a, s in my_strengths
+                    if _manhattan(a.position, enemy.position) <= GROUP_RADIUS
+                    or a.id == army.id
+                )
+                if local_strength / enemy_strength >= threshold:
+                    continue  # el grupo puede con él
+            ex, ey = enemy.position
+            for dx in range(-DANGER_RADIUS, DANGER_RADIUS + 1):
+                for dy in range(-DANGER_RADIUS, DANGER_RADIUS + 1):
+                    if abs(dx) + abs(dy) > DANGER_RADIUS:
+                        continue
+                    pos = (ex + dx, ey + dy)
+                    if game.world.in_bounds(pos):
+                        danger[pos] = danger.get(pos, 0.0) + DANGER_COST
+        return danger
 
     # --- detección de amenazas y memoria ---------------------------------------
 

@@ -8,6 +8,7 @@
     "umbral_crear_ejercito": 40,
     "agrupa": false,
     "coordina": false,
+    "evita_peligro": false,
     "descripcion": "Ataca casi siempre, ignora la economía y la defensa."
   },
   "medio": {
@@ -19,6 +20,7 @@
     "umbral_crear_ejercito": 30,
     "agrupa": false,
     "coordina": false,
+    "evita_peligro": false,
     "descripcion": "Calcula distancias, defiende fuertes, ataca con ventaja numérica."
   },
   "dificil": {
@@ -27,9 +29,10 @@
     "peso_economia": 0.5,
     "peso_defensa": 0.5,
     "umbral_ataque": 1.1,
-    "umbral_crear_ejercito": 30,
+    "umbral_crear_ejercito": 20,
     "agrupa": true,
     "coordina": true,
+    "evita_peligro": true,
     "descripcion": "Gestiona economía, agrupa ejércitos y reacciona al jugador."
   }
 }
