@@ -14,12 +14,13 @@ import pygame
 from wom.core.game import Game, Player
 from wom.core.victory import VictoryMode
 from wom.persistence.savegame import load_game
-from wom.ui import theme
+from wom.persistence.settings import load_settings
+from wom.ui import scale, theme
 from wom.ui.game_screen import GameScreen
 from wom.ui.menu_screen import LoadChoice, MenuScreen, NewGameChoice
 from wom.ui.music import MusicPlayer
 from wom.ui.music_overlay import MusicOverlay
-from wom.ui.video import apply_video_settings
+from wom.ui.video import apply_video_settings, parse_resolution
 
 WINDOW_TITLE = "WOM"
 HUMAN_ID = 0
@@ -37,19 +38,20 @@ def new_game(choice: NewGameChoice) -> Game:
 def run(seed: int | None = None, ai_level: str = "medio") -> None:
     """Punto de entrada de la aplicación gráfica. Arranca en el menú."""
     pygame.init()
-    # RESIZABLE + SCALED: la ventana se puede maximizar o redimensionar y
-    # pygame escala la resolución lógica (WINDOW_SIZE) manteniendo la
-    # proporción (bandas negras si hace falta); el mouse ya llega traducido.
-    screen = pygame.display.set_mode(
-        theme.WINDOW_SIZE, pygame.RESIZABLE | pygame.SCALED
-    )
+    # La ventana es redimensionable/maximizable y arranca con la resolución
+    # guardada; el juego dibuja siempre en un canvas lógico (WINDOW_SIZE)
+    # que scale.present() estira a la ventana manteniendo la proporción.
+    settings = load_settings()
+    pygame.display.set_mode(parse_resolution(settings.video_resolution), pygame.RESIZABLE)
     pygame.display.set_caption(WINDOW_TITLE)
+    if settings.video_maximized:
+        apply_video_settings(settings)
+    canvas = pygame.Surface(theme.WINDOW_SIZE)
     clock = pygame.time.Clock()
 
-    music = MusicPlayer()
+    music = MusicPlayer(settings=settings)
     music.start()  # un tema al azar desde el arranque (si está habilitada)
     music_overlay = MusicOverlay(music)
-    apply_video_settings(music.settings)  # resolución / maximizado guardados
 
     current: MenuScreen | GameScreen = MenuScreen(ai_level, seed, music=music)
     running = True
@@ -59,10 +61,10 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
                 running = False
             elif music.handle_event(event):
                 pass  # fin del tema: la playlist ya avanzó
-            elif music_overlay.handle_event(event):
-                pass  # M o input del reproductor modal
             else:
-                current.handle_event(event)
+                event = scale.translate_event(event)  # mouse físico → lógico
+                if not music_overlay.handle_event(event):
+                    current.handle_event(event)
 
         if isinstance(current, MenuScreen):
             action = current.take_action()
@@ -75,8 +77,9 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
         elif current.wants_menu:
             current = MenuScreen(ai_level, seed, music=music)
 
-        current.draw(screen)
-        music_overlay.draw(screen)
+        current.draw(canvas)
+        music_overlay.draw(canvas)
+        scale.present(pygame.display.get_surface(), canvas)
         pygame.display.flip()
         clock.tick(theme.FPS)
 

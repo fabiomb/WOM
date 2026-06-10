@@ -29,7 +29,7 @@ from wom.core.pathfind import shortest_path
 from wom.core.victory import VictoryResult
 from wom.core.worldmap import Coord
 from wom.persistence.savegame import save_game
-from wom.ui import theme
+from wom.ui import scale, theme
 from wom.ui.animation import TurnAnimation, build_turn_animation
 from wom.ui.assets import Assets
 from wom.ui.hud import Hud
@@ -65,7 +65,9 @@ class GameScreen:
         self.pending_quit = False
         self._dialog_buttons: dict[str, pygame.Rect] = {}
 
-        window = pygame.display.get_surface().get_rect()
+        # Layout sobre la resolución lógica: la app escala el canvas a la
+        # ventana real (scale.present), acá no importa el tamaño físico.
+        window = pygame.Rect((0, 0), theme.WINDOW_SIZE)
         map_area = pygame.Rect(
             0, 0, window.width - theme.SIDEBAR_WIDTH, window.height
         )
@@ -355,7 +357,7 @@ class GameScreen:
 
         yes = pygame.Rect(box.x + 30, box.bottom - 56, 180, 38)
         no = pygame.Rect(box.right - 210, box.bottom - 56, 180, 38)
-        mouse = pygame.mouse.get_pos()
+        mouse = scale.mouse_pos()
         for rect, text, base, hover in (
             (yes, yes_label, theme.BUTTON_BG, theme.BUTTON_BG_OVER),
             (no, "Cancelar (N)", (50, 56, 62), (70, 78, 86)),

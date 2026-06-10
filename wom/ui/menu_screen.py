@@ -21,7 +21,7 @@ from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
 from wom.persistence.savegame import list_saves, save_info
 from wom.persistence.settings import Settings
-from wom.ui import theme
+from wom.ui import scale, theme
 from wom.ui.assets import ASSETS_DIR
 from wom.ui.music import MusicPlayer
 from wom.ui.video import RESOLUTIONS, apply_video_settings
@@ -332,7 +332,7 @@ class MenuScreen:
             rect.height = 34 if option_style else 42
         rect.centerx = area.centerx
         rect.y = y
-        over = rect.collidepoint(pygame.mouse.get_pos())
+        over = rect.collidepoint(scale.mouse_pos())
         font = self.small_font if (option_style and self._on_scroll) else self.font
         if self._on_scroll:
             if over:

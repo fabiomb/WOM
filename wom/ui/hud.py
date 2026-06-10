@@ -8,7 +8,7 @@ from wom.core.army import Army
 from wom.core.game import Game
 from wom.core.victory import VictoryResult
 from wom.core.worldmap import Fort
-from wom.ui import theme
+from wom.ui import scale, theme
 
 
 MAX_ARMY_ROWS = 8  # filas de la lista de ejércitos propios
@@ -137,7 +137,7 @@ class Hud:
                 selected_fort is not None and selected_fort.reserve_total > 0
             )
             if self._create_button_visible:
-                over = self.create_button.collidepoint(pygame.mouse.get_pos())
+                over = self.create_button.collidepoint(scale.mouse_pos())
                 pygame.draw.rect(
                     surface, theme.BUTTON_BG_OVER if over else theme.BUTTON_BG,
                     self.create_button, border_radius=6,
@@ -151,14 +151,14 @@ class Hud:
                     rendered,
                     rendered.get_rect(midbottom=(self.rect.centerx, self.save_button.top - 8)),
                 )
-            over = self.save_button.collidepoint(pygame.mouse.get_pos())
+            over = self.save_button.collidepoint(scale.mouse_pos())
             pygame.draw.rect(
                 surface, (70, 78, 86) if over else (50, 56, 62),
                 self.save_button, border_radius=6,
             )
             label = self.small_font.render("Guardar partida (G)", True, theme.TEXT)
             surface.blit(label, label.get_rect(center=self.save_button.center))
-            over = self.button.collidepoint(pygame.mouse.get_pos())
+            over = self.button.collidepoint(scale.mouse_pos())
             pygame.draw.rect(
                 surface, theme.BUTTON_BG_OVER if over else theme.BUTTON_BG,
                 self.button, border_radius=6,

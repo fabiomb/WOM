@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pygame
 
-from wom.ui import theme
+from wom.ui import scale, theme
 from wom.ui.music import MusicPlayer
 
 BOX_SIZE = (480, 240)
@@ -142,7 +142,7 @@ class MusicOverlay:
     def _draw_button(
         self, surface: pygame.Surface, bid: str, label: str, rect: pygame.Rect
     ) -> None:
-        over = rect.collidepoint(pygame.mouse.get_pos())
+        over = rect.collidepoint(scale.mouse_pos())
         pygame.draw.rect(
             surface, (70, 78, 86) if over else (50, 56, 62), rect, border_radius=6
         )
