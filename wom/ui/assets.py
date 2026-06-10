@@ -15,7 +15,7 @@ from wom.core.worldmap import Terrain
 ASSETS_DIR = Path(__file__).resolve().parents[2] / "data" / "assets"
 
 UNIT_IDS = ("partisano", "soldado", "caballero", "arquero")
-ICON_IDS = ("fort", "town", "flag", "cross")
+ICON_IDS = ("fort", "town", "flag", "flag_red", "flag_blue", "cross")
 FALLBACK_COLOR = (200, 0, 200)
 
 

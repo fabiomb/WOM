@@ -14,6 +14,11 @@ Fórmula de poder por ejército:
 
 donde stat es `ataque` para el atacante y `defensa` para el defensor.
 
+Si el defensor está en un fuerte recibe `bonus_defensa_fort`, pero las
+clases atacantes con `ignora_bonus_fort` (los arqueros) lo cancelan para
+su propia contribución: pelean 1:1 contra el defensor, como si el fuerte
+no estuviera.
+
 El ratio de poderes (atacante/defensor) decide el resultado:
 
     ratio >= umbral_victoria          -> ATTACKER_WINS
@@ -159,6 +164,7 @@ def _army_power(
     cfg = battle_config
     terrain = world.terrain_at(army.position).value
     enemy_total = max(enemy.total_troops, 1)
+    enemy_in_fort = world.fort_at(enemy.position) is not None
 
     base = 0.0
     for class_id, count in army.composition.items():
@@ -172,7 +178,11 @@ def _army_power(
             if enemy_count > 0
         ) or 1.0
         bonus_terrain = unit.bonus_terreno.get(terrain, 1.0)
-        base += count * stat * bonus_vs * bonus_terrain
+        contribution = count * stat * bonus_vs * bonus_terrain
+        if not is_defender and unit.ignora_bonus_fort and enemy_in_fort:
+            # Cancela el bonus de fuerte del defensor: esta clase pelea 1:1.
+            contribution *= cfg["bonus_defensa_fort"]
+        base += contribution
 
     food_min = cfg["factor_comida_min"]
     xp_min = cfg["factor_xp_min"]

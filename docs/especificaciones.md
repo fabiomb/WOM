@@ -51,7 +51,8 @@ Beneficios concretos para WOM:
   producción se acumula ahí y las tropas solo salen al mapa por una acción
   voluntaria del jugador (crear ejército o reabastecer uno estacionado).
   Un fuerte capturado pierde toda su reserva.
-- **Generador**: recibe `MapParams(width, height, n_forts, n_towns, seed)`. Garantiza: forts iniciales de cada jugador en extremos opuestos, todo fort/town alcanzable (conectividad por flood-fill), distribución pseudo-uniforme.
+- **Generador**: recibe `MapParams(width, height, n_forts, n_towns, seed)`. Garantiza: forts iniciales de cada jugador en extremos opuestos, todo fort/town alcanzable (conectividad por flood-fill).
+- El terreno se genera por **features coherentes** (no ruido tile a tile): cadenas montañosas (caminatas con dirección dominante, serpenteo y engrosamiento), bosques en manchas (crecimiento desde semillas), lagos y un río serpenteante que cruza el mapa dejando **vados** transitables cada 3-6 tiles para no cortar la conectividad. Las proporciones objetivo (`TERRAIN_TARGETS`: 20% bosque, 15% montaña, 10% agua) viven en `core/mapgen.py`.
 - El mapa se serializa a JSON → "fácil de editar" y base del editor futuro.
 
 ### 3.2 Ejércitos (`core/army.py`)
@@ -86,7 +87,7 @@ Las cuatro clases (`partisano`, `soldado`, `caballero`, `arquero`) se definen **
 }
 ```
 
-Esquema por clase: `velocidad`, `ataque`, `defensa`, `bonus_terreno` (multiplicadores), `bonus_vs` (piedra-papel-tijera entre clases). Agregar/balancear clases no toca código.
+Esquema por clase: `velocidad`, `ataque`, `defensa`, `bonus_terreno` (multiplicadores), `bonus_vs` (piedra-papel-tijera entre clases), `ignora_bonus_fort` (opcional: al atacar un fuerte la clase no sufre el bonus defensivo del fuerte; lo tiene el arquero). Agregar/balancear clases no toca código.
 
 ### 3.4 Turnos (`core/game.py`, `core/orders.py`)
 
@@ -115,7 +116,7 @@ cada bando pelea desde su propio tile (usa su propio bonus de terreno).
 
 - Ratio de poderes determina resultado: victoria clara, empate o retirada (umbrales en config).
 - Pérdidas: proporcionales al ratio; el perdedor pierde más; **la retirada penaliza extra** en XP y tropas.
-- Defensa en fort/town otorga multiplicador defensivo (config).
+- Defensa en fort/town otorga multiplicador defensivo (config: `bonus_defensa_fort` 1.5, `bonus_defensa_town` 1.2). Excepción: las clases atacantes con `ignora_bonus_fort` (los arqueros, que disparan por encima de las murallas) cancelan el bonus de fuerte para su propia contribución y pelean 1:1 contra el defensor.
 - Toda la aleatoriedad usa el RNG de la partida (seed) ⇒ replays y tests deterministas.
 
 ### 3.6 Victoria (`core/victory.py`)

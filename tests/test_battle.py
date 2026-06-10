@@ -74,6 +74,41 @@ def test_defensa_en_fuerte_ayuda():
     assert sum(in_fort.defender_losses.values()) < sum(in_field.defender_losses.values())
 
 
+def test_arqueros_ignoran_el_bonus_de_fuerte():
+    """Atacante 100% arqueros: el fuerte del defensor no cambia nada (1:1)."""
+    cfg = _battle_config(sigma_aleatoriedad=0.0)
+    attacker = Army(id=0, owner=0, position=(1, 1), composition={"arquero": 50})
+    defender = Army(id=1, owner=1, position=(1, 2), composition={"soldado": 50})
+    world_field = _flat_world()
+    world_fort = _flat_world()
+    world_fort.forts.append(Fort(position=(1, 2), owner=1))
+    in_field = resolve_battle(attacker, defender, world_field, CLASSES, cfg, random.Random(1))
+    in_fort = resolve_battle(attacker, defender, world_fort, CLASSES, cfg, random.Random(1))
+    assert in_fort == in_field
+
+
+def test_atacante_mixto_sufre_el_fuerte_menos_que_uno_sin_arqueros():
+    """Los arqueros de un ejército mixto pelean 1:1; el resto sufre el fuerte."""
+    cfg = _battle_config(sigma_aleatoriedad=0.0)
+    defender = Army(id=1, owner=1, position=(1, 2), composition={"soldado": 50})
+    world_fort = _flat_world()
+    world_fort.forts.append(Fort(position=(1, 2), owner=1))
+    world_field = _flat_world()
+
+    def increase(composition: dict[str, int]) -> float:
+        """Cuánto empeoran las bajas del atacante por culpa del fuerte."""
+        att = Army(id=0, owner=0, position=(1, 1), composition=composition)
+        fort = resolve_battle(att, defender, world_fort, CLASSES, cfg, random.Random(1))
+        field = resolve_battle(att, defender, world_field, CLASSES, cfg, random.Random(1))
+        return (sum(fort.attacker_losses.values())
+                / max(sum(field.attacker_losses.values()), 1))
+
+    mixed = increase({"soldado": 25, "arquero": 25})
+    melee = increase({"soldado": 50})
+    assert mixed > 1.0  # el fuerte sigue ayudando contra la parte no-arquera
+    assert mixed < melee  # pero menos que contra un atacante sin arqueros
+
+
 def test_determinismo_con_mismo_rng():
     world = _flat_world()
     cfg = _battle_config()

@@ -1,8 +1,10 @@
 """Tests del generador de mapas: determinismo, conectividad y garantías."""
 
 import random
+from collections import Counter
 
-from wom.core.mapgen import MapParams, _is_fully_connected, generate_map
+from wom.core.mapgen import TERRAIN_TARGETS, MapParams, _is_fully_connected, generate_map
+from wom.core.worldmap import Terrain
 
 
 def _gen(seed: int, **kwargs) -> tuple:
@@ -45,6 +47,46 @@ def test_todo_alcanzable():
     for seed in range(10):
         _, world = _gen(seed)
         assert _is_fully_connected(world)
+
+
+def test_terreno_coherente_en_manchas():
+    """Casi todo tile de bosque/montaña/agua tiene un vecino igual (con
+    ruido tile a tile puro sería ~60-75%); mide la coherencia del generador."""
+    for terrain in (Terrain.FOREST, Terrain.MOUNTAIN, Terrain.WATER):
+        total = clustered = 0
+        for seed in range(5):
+            _, world = _gen(seed)
+            for y in range(world.height):
+                for x in range(world.width):
+                    if world.tiles[y][x] is not terrain:
+                        continue
+                    total += 1
+                    neighbors = [
+                        (x + dx, y + dy)
+                        for dx in (-1, 0, 1)
+                        for dy in (-1, 0, 1)
+                        if (dx, dy) != (0, 0)
+                    ]
+                    if any(
+                        world.in_bounds(n) and world.tiles[n[1]][n[0]] is terrain
+                        for n in neighbors
+                    ):
+                        clustered += 1
+        assert total > 0, f"no se generó nada de {terrain}"
+        assert clustered / total > 0.85, f"{terrain} demasiado disperso"
+
+
+def test_proporciones_de_terreno():
+    counts: Counter = Counter()
+    for seed in range(5):
+        _, world = _gen(seed)
+        for row in world.tiles:
+            counts.update(row)
+    total = sum(counts.values())
+    assert counts[Terrain.PLAINS] / total > 0.4  # la llanura domina
+    for terrain, target in TERRAIN_TARGETS.items():
+        share = counts[terrain] / total
+        assert 0.3 * target < share < 1.8 * target, f"{terrain}: {share:.2f}"
 
 
 def test_serializacion_ida_y_vuelta():

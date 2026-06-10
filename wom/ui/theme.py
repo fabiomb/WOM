@@ -23,5 +23,13 @@ BUTTON_BG_OVER = (80, 140, 80)
 GAMEOVER_BG = (0, 0, 0, 180)
 
 
+FLAG_ICONS = {0: "flag_red", 1: "flag_blue"}  # asset de bandera por dueño
+
+
 def player_color(owner: int) -> tuple[int, int, int]:
     return PLAYER_COLORS.get(owner, NEUTRAL_COLOR)
+
+
+def flag_icon(owner: int) -> str:
+    """Nombre del asset de bandera según el dueño del sitio (gris si neutral)."""
+    return FLAG_ICONS.get(owner, "flag")

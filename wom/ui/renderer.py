@@ -78,12 +78,12 @@ class MapRenderer:
     def _draw_sites(self, surface: pygame.Surface, game: Game) -> None:
         for kind, sites in (("fort", game.world.forts), ("town", game.world.towns)):
             icon = self.assets.icons[kind]
-            flag = self.assets.icons["flag"]
             for site in sites:
                 rect = self.tile_rect(site.position)
                 surface.blit(icon, icon.get_rect(center=rect.center))
                 pygame.draw.rect(surface, theme.player_color(site.owner), rect, 3)
                 if site.has_flag:
+                    flag = self.assets.icons[theme.flag_icon(site.owner)]
                     surface.blit(flag, (rect.x + 2, rect.y + 2))
                 if kind == "fort" and site.reserve_total > 0:
                     text = self.count_font.render(str(site.reserve_total), True, theme.TEXT)

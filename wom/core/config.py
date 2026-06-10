@@ -20,6 +20,10 @@ class UnitClass:
     defensa: int
     bonus_terreno: dict[str, float]
     bonus_vs: dict[str, float]
+    # Al atacar un fuerte, la clase no sufre el bonus de defensa del fuerte
+    # (pelea 1:1 contra el defensor); p. ej. los arqueros disparan por
+    # encima de las murallas.
+    ignora_bonus_fort: bool = False
 
 
 def load_unit_classes(path: Path | None = None) -> dict[str, UnitClass]:
@@ -34,6 +38,7 @@ def load_unit_classes(path: Path | None = None) -> dict[str, UnitClass]:
             defensa=data["defensa"],
             bonus_terreno=data.get("bonus_terreno", {}),
             bonus_vs=data.get("bonus_vs", {}),
+            ignora_bonus_fort=data.get("ignora_bonus_fort", False),
         )
         for class_id, data in raw.items()
     }
