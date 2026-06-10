@@ -85,6 +85,10 @@ class Game:
     # Batallas del último turno: (posición del defensor, nombre del resultado).
     # Lo consumen la UI (feedback al jugador) y el debug de la AI.
     last_battles: list[tuple[Coord, str]] = field(default_factory=list)
+    # Recorrido del último turno: army_id → tiles pisados en orden (posición
+    # inicial primero, retirada incluida). Lo consume la UI para animar el
+    # movimiento; transitorio como last_battles, no se serializa.
+    last_moves: dict[int, list[Coord]] = field(default_factory=dict)
     _battle_queue: list[tuple[int, int]] = field(default_factory=list)
 
     @classmethod
@@ -118,6 +122,7 @@ class Game:
     def run_turn(self, orders: list[Order]) -> VictoryResult:
         """Ejecuta un turno completo y devuelve el estado de victoria."""
         self.last_battles.clear()
+        self.last_moves.clear()
         self._apply_orders(orders)
         self._move_armies()
         self._resolve_battles()
@@ -177,6 +182,7 @@ class Game:
                         occupant.path.clear()
                     army.path.clear()  # tile ocupado (aliado o enemigo): se detiene
                     break
+                self._record_move(army.id, army.position, step)
                 army.position = step
                 army.path.pop(0)
                 points -= cost
@@ -215,9 +221,15 @@ class Game:
         if not options:
             return  # rodeado: se queda y probablemente vuelva a pelear
         far = max(_manhattan(pos, enemy_pos) for pos in options)
-        army.position = self.rng.choice(
+        destination = self.rng.choice(
             [pos for pos in options if _manhattan(pos, enemy_pos) == far]
         )
+        self._record_move(army.id, army.position, destination)
+        army.position = destination
+
+    def _record_move(self, army_id: int, origin: Coord, dest: Coord) -> None:
+        """Acumula el recorrido del turno (para la animación de la UI)."""
+        self.last_moves.setdefault(army_id, [origin]).append(dest)
 
     def _capture(self) -> None:
         for site in (*self.world.forts, *self.world.towns):

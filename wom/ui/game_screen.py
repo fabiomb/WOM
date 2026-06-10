@@ -7,7 +7,9 @@ Interacción:
 - Sin ejército seleccionado, click en un fuerte propio: lo selecciona y el
   HUD ofrece "Crear ejército" (toma tropas de la reserva del fuerte).
 - Click derecho: borra el camino trazado y deselecciona.
-- Botón "Fin del turno" o Enter: ejecuta el turno (humano + AI).
+- Botón "Fin del turno" o Enter: ejecuta el turno (humano + AI). El
+  movimiento resultante se anima de forma fluida (Enter/Espacio/click la
+  saltea); el resto del input queda bloqueado mientras tanto.
 - Botón "Guardar" o tecla G: guarda la partida en saves/ con timestamp.
 - ESC: vuelve al menú principal (la partida no guardada se pierde).
 """
@@ -24,6 +26,7 @@ from wom.core.victory import VictoryResult
 from wom.core.worldmap import Coord
 from wom.persistence.savegame import save_game
 from wom.ui import theme
+from wom.ui.animation import TurnAnimation, build_turn_animation
 from wom.ui.assets import Assets
 from wom.ui.hud import Hud
 from wom.ui.renderer import MapRenderer
@@ -45,6 +48,8 @@ class GameScreen:
         self.wants_menu = False  # lo activa ESC; lo consume el loop de app
         self.notice: str | None = None  # aviso temporal del HUD ("guardada...")
         self.notice_until = 0
+        self.animation: TurnAnimation | None = None
+        self.animation_start = 0  # ticks de pygame al iniciar la animación
 
         window = pygame.display.get_surface().get_rect()
         map_area = pygame.Rect(
@@ -62,11 +67,29 @@ class GameScreen:
     def game_over(self) -> bool:
         return self.result is not None and self.result.is_over
 
+    @property
+    def animating(self) -> bool:
+        return self.animation is not None and not self.animation.finished(
+            self._animation_elapsed()
+        )
+
+    def _animation_elapsed(self) -> float:
+        return (pygame.time.get_ticks() - self.animation_start) / 1000.0
+
     # --- input -------------------------------------------------------------
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             self.wants_menu = True
+            return
+        if self.animating:
+            # Mientras anima solo se acepta saltearla; el estado ya es el final.
+            if (
+                event.type == pygame.MOUSEBUTTONDOWN
+                or (event.type == pygame.KEYDOWN
+                    and event.key in (pygame.K_RETURN, pygame.K_SPACE))
+            ):
+                self.animation.skip()
             return
         if self.game_over:
             return
@@ -141,6 +164,7 @@ class GameScreen:
     # --- turno ---------------------------------------------------------------
 
     def end_turn(self) -> None:
+        self.animation = None  # descarta una animación anterior si la hubiera
         orders: list[Order] = [
             CreateArmyOrder(position=pos) for pos in self.pending_creations
         ]
@@ -151,7 +175,11 @@ class GameScreen:
         ]
         for ai in self.ais:
             orders.extend(ai.decide_orders(self.game))
+        # Snapshot pre-turno: conserva sprite/posición de los que mueran.
+        pre_turn = [army.to_dict() for army in self.game.armies]
         self.result = self.game.run_turn(orders)
+        self.animation = build_turn_animation(self.game, pre_turn)
+        self.animation_start = pygame.time.get_ticks()
         self.pending_paths.clear()
         self.pending_creations.clear()
         self.selected_id = None
@@ -161,10 +189,18 @@ class GameScreen:
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(theme.BACKGROUND)
+        animating = self.animating  # una sola lectura del reloj por frame
         self.renderer.draw(
             surface, self.game, self.selected_id, self.pending_paths,
-            self.selected_fort, self.pending_creations,
+            self.selected_fort, self.pending_creations, hide_armies=animating,
         )
+        if animating:
+            for motion, pos in self.animation.positions(self._animation_elapsed()):
+                self.renderer.draw_army_at(
+                    surface, motion.owner, motion.class_id, motion.troops, pos
+                )
+        elif self.animation is not None:
+            self.animation = None  # terminó: vuelve el dibujo normal
         selected = (
             self.game.army_by_id(self.selected_id) if self.selected_id is not None else None
         )
@@ -173,7 +209,10 @@ class GameScreen:
             if self.selected_fort is not None else None
         )
         notice = self.notice if pygame.time.get_ticks() < self.notice_until else None
+        # El overlay de fin de partida espera a que termine la animación
+        # del último turno (que se vea el movimiento que la definió).
+        result = None if animating else self.result
         self.hud.draw(
             surface, self.game, selected, fort,
-            self.selected_fort in self.pending_creations, self.result, notice,
+            self.selected_fort in self.pending_creations, result, notice,
         )

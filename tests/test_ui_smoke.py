@@ -112,6 +112,34 @@ def test_crear_ejercito_desde_fuerte(screen, game_screen):
     assert created.total_troops >= 50
 
 
+def test_animacion_de_movimiento(screen, game_screen):
+    game = game_screen.game
+    army = game.armies_of(0)[0]
+    start = army.position
+    x, y = start
+    target = (x + 2, y) if game.world.is_passable((x + 2, y)) else (x, y + 2)
+    _click(game_screen, game_screen.renderer.tile_center(start))
+    _click(game_screen, game_screen.renderer.tile_center(target))
+    game_screen.end_turn()
+
+    assert game_screen.animation is not None
+    assert game_screen.animating  # recién terminado el turno: animando
+    game_screen.draw(screen)  # dibuja posiciones interpoladas sin romper
+
+    # durante la animación el input normal queda bloqueado...
+    game_screen.handle_event(
+        pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_g})
+    )
+    assert game_screen.notice is None  # la G no guardó: estaba animando
+    # ...y Enter la saltea
+    game_screen.handle_event(
+        pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_RETURN})
+    )
+    assert not game_screen.animating
+    game_screen.draw(screen)  # vuelve el dibujo normal y descarta la animación
+    assert game_screen.animation is None
+
+
 def test_guardar_desde_la_partida(screen, game_screen, tmp_path, monkeypatch):
     monkeypatch.setattr(savegame, "SAVES_DIR", tmp_path)
     game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_g}))

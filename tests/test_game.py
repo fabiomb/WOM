@@ -39,6 +39,25 @@ def test_movimiento_consume_velocidad():
     assert army.path == [(5, 1), (6, 1)]  # el resto queda para el próximo turno
 
 
+def test_last_moves_registra_el_recorrido():
+    game = _make_game()
+    army = game.spawn_army(0, (1, 1), {"soldado": 10})  # velocidad 3
+    game.run_turn([MoveOrder(army_id=army.id, path=((2, 1), (3, 1), (4, 1)))])
+    assert game.last_moves[army.id] == [(1, 1), (2, 1), (3, 1), (4, 1)]
+    game.run_turn([])  # sin órdenes: el registro del turno anterior se limpia
+    assert game.last_moves == {}
+
+
+def test_last_moves_incluye_la_retirada():
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 100})
+    b = game.spawn_army(1, (4, 1), {"soldado": 5})  # muy inferior: pierde y huye
+    game.run_turn([MoveOrder(army_id=a.id, path=((3, 1), (4, 1)))])
+    if b in game.armies:  # si sobrevivió, su recorrido es la retirada
+        moves = game.last_moves[b.id]
+        assert moves[0] == (4, 1) and moves[-1] == b.position != (4, 1)
+
+
 def test_encuentro_detiene_y_pelea():
     game = _make_game()
     a = game.spawn_army(0, (2, 1), {"soldado": 50})

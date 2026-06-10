@@ -50,13 +50,18 @@ class MapRenderer:
         pending_paths: dict[int, list[Coord]],
         selected_fort: Coord | None = None,
         pending_creations: set[Coord] = frozenset(),
+        hide_armies: bool = False,
     ) -> None:
+        """Dibuja el estado del juego. Con `hide_armies` omite los ejércitos:
+        durante la animación de fin de turno los dibuja GameScreen en sus
+        posiciones interpoladas (draw_army_at)."""
         self._draw_terrain(surface, game)
         self._draw_sites(surface, game)
         self._draw_crosses(surface, game)
         self._draw_paths(surface, game, selected_id, pending_paths)
-        for army in game.armies:
-            self._draw_army(surface, game, army, selected=army.id == selected_id)
+        if not hide_armies:
+            for army in game.armies:
+                self._draw_army(surface, game, army, selected=army.id == selected_id)
         if selected_fort is not None:
             pygame.draw.rect(surface, theme.SELECTION, self.tile_rect(selected_fort), 3)
         for pos in pending_creations:
@@ -121,15 +126,35 @@ class MapRenderer:
     def _draw_army(
         self, surface: pygame.Surface, game: Game, army: Army, *, selected: bool
     ) -> None:
-        rect = self.tile_rect(army.position)
         dominant = max(army.composition, key=lambda c: army.composition[c])
-        sprite = self.assets.units[dominant]
+        rect = self.draw_army_at(
+            surface, army.owner, dominant, army.total_troops, army.position
+        )
+        if selected:
+            pygame.draw.rect(surface, theme.SELECTION, rect, 3)
+
+    def draw_army_at(
+        self,
+        surface: pygame.Surface,
+        owner: int,
+        class_id: str,
+        troops: int,
+        tile_pos: tuple[float, float],
+    ) -> pygame.Rect:
+        """Dibuja un ejército en una posición de tile, entera o fraccionaria
+        (la animación de movimiento interpola entre tiles)."""
+        ts = self.tile_size
+        rect = pygame.Rect(
+            round(self.origin[0] + tile_pos[0] * ts),
+            round(self.origin[1] + tile_pos[1] * ts),
+            ts, ts,
+        )
+        sprite = self.assets.units[class_id]
         surface.blit(sprite, sprite.get_rect(center=rect.center))
-        pygame.draw.rect(surface, theme.player_color(army.owner), rect, 2)
-        count = self.count_font.render(str(army.total_troops), True, theme.TEXT)
-        shadow = self.count_font.render(str(army.total_troops), True, (0, 0, 0))
+        pygame.draw.rect(surface, theme.player_color(owner), rect, 2)
+        count = self.count_font.render(str(troops), True, theme.TEXT)
+        shadow = self.count_font.render(str(troops), True, (0, 0, 0))
         pos = (rect.right - count.get_width() - 2, rect.bottom - count.get_height())
         surface.blit(shadow, (pos[0] + 1, pos[1] + 1))
         surface.blit(count, pos)
-        if selected:
-            pygame.draw.rect(surface, theme.SELECTION, rect, 3)
+        return rect
