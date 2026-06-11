@@ -15,7 +15,7 @@ import pygame
 from wom.persistence.settings import Settings
 
 RESOLUTIONS = ["1280x720", "1600x900", "1920x1080", "2560x1440"]
-DEFAULT_RESOLUTION = (1280, 720)
+DEFAULT_RESOLUTION = (1920, 1080)
 
 
 def parse_resolution(text: str) -> tuple[int, int]:

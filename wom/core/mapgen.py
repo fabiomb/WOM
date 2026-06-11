@@ -151,22 +151,31 @@ def _grow_blob(
 
 
 def _paint_water(world: WorldMap, target: int, rng: random.Random) -> None:
-    """Agua: un río que cruza el mapa (si es lo bastante grande) y lagos."""
+    """Agua: un río que cruza el mapa (si es lo bastante grande) y lagos.
+
+    Los puentes se construyen al final, con toda el agua ya pintada, para
+    poder extenderlos de orilla a orilla (un puente nunca termina en agua).
+    """
     painted = 0
+    crossings: list[tuple[Coord, bool]] = []  # (posición, río vertical)
     if min(world.width, world.height) >= 15:
-        painted += _paint_river(world, rng)
+        painted += _paint_river(world, rng, crossings)
     for _ in range(100):
         if painted >= target:
-            return
+            break
         seed = (rng.randrange(world.width), rng.randrange(world.height))
         size = min(rng.randint(3, 9), target - painted)
         painted += _grow_blob(world, seed, size, Terrain.WATER, rng)
+    for pos, vertical in crossings:
+        _build_bridge(world, pos, vertical)
 
 
-def _paint_river(world: WorldMap, rng: random.Random) -> int:
-    """Río serpenteante de borde a borde. Cada pocos tiles pone un puente
-    (perpendicular al curso, transitable) para que el río no corte el mapa
-    en dos."""
+def _paint_river(
+    world: WorldMap, rng: random.Random, crossings: list[tuple[Coord, bool]]
+) -> int:
+    """Río serpenteante de borde a borde. Cada pocos tiles registra un cruce
+    en `crossings` (ahí irá un puente) para que el río no corte el mapa en
+    dos."""
     vertical = rng.random() < 0.5
     if vertical:
         x, y = rng.randrange(world.width // 4, 3 * world.width // 4), 0
@@ -182,8 +191,7 @@ def _paint_river(world: WorldMap, rng: random.Random) -> int:
         next_ford -= 1
         if next_ford <= 0:
             next_ford = rng.randint(3, 6)
-            # Puente: cruza el río perpendicular a su curso (transitable).
-            world.tiles[y][x] = Terrain.BRIDGE_H if vertical else Terrain.BRIDGE_V
+            crossings.append(((x, y), vertical))
         elif world.tiles[y][x] is not Terrain.WATER:
             world.tiles[y][x] = Terrain.WATER  # el río atraviesa cualquier terreno
             painted += 1
@@ -196,6 +204,21 @@ def _paint_river(world: WorldMap, rng: random.Random) -> int:
         else:
             x, y = x + main[0], y + main[1]
     return painted
+
+
+def _build_bridge(world: WorldMap, pos: Coord, vertical_river: bool) -> None:
+    """Puente completo: cruza perpendicular al río y se extiende sobre el
+    agua en ambos sentidos hasta tocar tierra (nunca termina en agua)."""
+    terrain = Terrain.BRIDGE_H if vertical_river else Terrain.BRIDGE_V
+    dx, dy = (1, 0) if vertical_river else (0, 1)  # eje del cruce
+    world.tiles[pos[1]][pos[0]] = terrain
+    for sign in (1, -1):
+        x, y = pos
+        while True:
+            x, y = x + sign * dx, y + sign * dy
+            if not world.in_bounds((x, y)) or world.tiles[y][x] is not Terrain.WATER:
+                break
+            world.tiles[y][x] = terrain
 
 
 def _place_features(world: WorldMap, params: MapParams, rng: random.Random) -> bool:

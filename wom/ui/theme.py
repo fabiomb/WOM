@@ -1,7 +1,7 @@
 """Constantes visuales de la UI: colores, tamaños, layout."""
 
-WINDOW_SIZE = (1280, 720)
-SIDEBAR_WIDTH = 320
+WINDOW_SIZE = (1920, 1080)
+SIDEBAR_WIDTH = 480
 FPS = 60
 
 PLAYER_COLORS = {
