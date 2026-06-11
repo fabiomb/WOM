@@ -203,3 +203,37 @@ Fuera de alcance v1 (explícito en idea.md): zoom de batalla táctica, editor de
 | Balance de clases | Medio | Todo en config + simulación AI vs AI masiva |
 | Scope creep hacia v2 | Alto | Roadmap cerrado; zoom/editor/multiplayer explícitamente fuera de v1 |
 | Rendimiento de render con mapas grandes | Bajo | Render por dirty-rects o por viewport; mapas v1 acotados |
+
+
+## 10. Desarrollo extra
+
+### Mapa
+* Aprovechar el mapa y los tiles para poder hacer un zoom in/out con rueda del mouse para ver el mapa más de cerca, el movimiento del mouse a los bordes de la ventana debería mover la posición del mapa en esa dirección cuando se está con zoom in
+* Las opciones de tamaño actuales desaprovechan un poco las posibilidades de una PC, podríamos tener mapas un poco más grandes o un tamaño "super grande" de más tiles.
+
+### Movimiento
+* Mientras se dibuja el camino para una tropa, l hacer doble click en una posición, debería guardar ese camino y liberar el foco así se puede hacer click en otra tropa o castillo sin seguir agregando puntos al camino
+* El dibujo de la ruta podría ser más sauve sin rectas duras y con una flecha al final, para que parezca dibujado por un general sobre un mapa
+
+### Organización de tropas
+* Permitir dividir un ejército con modal para elegir qué clases van al nuevo ejército
+* Al fusionar permitir elegir "Todo" o cantidad por cada clase, mostrar un modal donde se pueda elegir por clase cuáles van a qué ejército
+
+
+
+## 11. Fase 2
+
+### Multijugador
+
+* Opción en el menú de creación de partida para abrir a otros usuarios
+* Elegir un puerto poco usado
+* Definir timeout para turno (todo el tiempo, 10 segundos, 30 segundos), si no envía el turno, se ejecuta automático
+* Definir nombre del jugador
+* Crear entorno de conexión
+* Un jugador es host y el otro se conecta a ese IP por el puerto
+
+### Zoom en batalla
+
+Dos escenarios posibles: contra un castillo, en terreno abierto
+
+### 
