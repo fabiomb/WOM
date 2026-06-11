@@ -60,13 +60,16 @@ class MapRenderer:
         selected_fort: Coord | None = None,
         pending_creations: set[Coord] = frozenset(),
         hide_armies: bool = False,
+        hide_new_crosses: bool = False,
     ) -> None:
         """Dibuja el estado del juego. Con `hide_armies` omite los ejércitos:
         durante la animación de fin de turno los dibuja GameScreen en sus
-        posiciones interpoladas (draw_army_at)."""
+        posiciones interpoladas (draw_army_at). Con `hide_new_crosses` omite
+        las cruces del turno recién jugado: la animación de batalla todavía
+        no reveló esas muertes."""
         self._draw_terrain(surface, game)
         self._draw_sites(surface, game)
-        self._draw_crosses(surface, game)
+        self._draw_crosses(surface, game, hide_new=hide_new_crosses)
         self._draw_paths(surface, game, selected_id, pending_paths)
         if not hide_armies:
             for army in game.armies:
@@ -105,13 +108,18 @@ class MapRenderer:
                     surface.blit(shadow, (pos[0] + 1, pos[1] + 1))
                     surface.blit(text, pos)
 
-    def _draw_crosses(self, surface: pygame.Surface, game: Game) -> None:
+    def _draw_crosses(
+        self, surface: pygame.Surface, game: Game, hide_new: bool = False
+    ) -> None:
         """Las cruces se desvanecen con la edad hasta que el core las purga
         (turnos_cruz): opacidad plena el turno siguiente a la muerte y un
-        quinto por turno desde ahí."""
+        quinto por turno desde ahí. Con `hide_new` se omiten las del último
+        run_turn (died_turn == turn - 1)."""
         cross = self.assets.icons["cross"]
         lifetime = game.config["turnos_cruz"]
         for x, y, died_turn in game.crosses:
+            if hide_new and died_turn >= game.turn - 1:
+                continue
             age = game.turn - died_turn
             opacity = max(0.0, min(1.0, (lifetime - age + 1) / lifetime))
             cross.set_alpha(round(255 * opacity))
@@ -153,6 +161,56 @@ class MapRenderer:
         )
         if selected:
             pygame.draw.rect(surface, theme.SELECTION, rect, 3)
+
+    def draw_tile_rings(
+        self,
+        surface: pygame.Surface,
+        pos: Coord,
+        rings: list[tuple[float, float]],
+        color: tuple[int, int, int],
+    ) -> None:
+        """Anillos esfumados alrededor de un tile (señala el ejército inicial).
+
+        `rings` son pares (radio en tiles, opacidad 0..1), como los devuelve
+        animation.spawn_highlight_rings.
+        """
+        if not rings:
+            return
+        ts = self.tile_size
+        width = max(2, ts // 16)
+        extent = int(max(radius for radius, _ in rings) * ts) + width + 1
+        overlay = pygame.Surface((2 * extent, 2 * extent), pygame.SRCALPHA)
+        for radius_tiles, opacity in rings:
+            pygame.draw.circle(
+                overlay, (*color, round(255 * opacity)),
+                (extent, extent), round(radius_tiles * ts), width,
+            )
+        surface.blit(overlay, overlay.get_rect(center=self.tile_center(pos)))
+
+    def draw_clash(
+        self, surface: pygame.Surface, tile_pos: tuple[float, float], intensity: float
+    ) -> None:
+        """Destello en el punto de contacto de una batalla (fase de choque).
+
+        `tile_pos` admite coordenadas fraccionarias (el punto medio entre
+        ambos bandos); `intensity` 0..1 modula tamaño y opacidad.
+        """
+        ts = self.tile_size
+        center = (
+            round(self.origin[0] + (tile_pos[0] + 0.5) * ts),
+            round(self.origin[1] + (tile_pos[1] + 0.5) * ts),
+        )
+        radius = max(2, int(ts * (0.25 + 0.35 * intensity)))
+        overlay = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        alpha = round(90 + 130 * intensity)
+        pygame.draw.circle(
+            overlay, (*theme.CLASH_FLASH, alpha), (radius, radius), radius
+        )
+        pygame.draw.circle(
+            overlay, (*theme.CLASH_CORE, min(255, alpha + 60)),
+            (radius, radius), max(2, radius // 2),
+        )
+        surface.blit(overlay, overlay.get_rect(center=center))
 
     def draw_army_at(
         self,

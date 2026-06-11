@@ -8,7 +8,9 @@ Fases de un turno (orden fijo, determinista dada la seed):
                   de ejército. Intentar entrar al tile de un enemigo detiene
                   a ambos y encola una batalla.
 3. Batallas     — se resuelven todas las encoladas (core.battle). El bando
-                  que pierde o se retira abandona su tile si sobrevive.
+                  que pierde o se retira abandona su tile si sobrevive,
+                  salvo que esté en un fuerte: la retirada solo ocurre en
+                  campo abierto.
 4. Captura      — fort/town con un ejército encima pasa a su dueño; la
                   reserva de un fuerte capturado se pierde.
 5. Producción   — towns: +comida al stock del dueño; forts: producen tropas
@@ -94,6 +96,11 @@ class Game:
     # Batallas del último turno: (posición del defensor, nombre del resultado).
     # Lo consumen la UI (feedback al jugador) y el debug de la AI.
     last_battles: list[tuple[Coord, str]] = field(default_factory=list)
+    # Choques del último turno: (id atacante, id defensor) por batalla, y
+    # quiénes se retiraron tras pelear. Los consume la animación de batalla
+    # de la UI; transitorios como last_battles, no se serializan.
+    last_clashes: list[tuple[int, int]] = field(default_factory=list)
+    last_retreats: set[int] = field(default_factory=set)
     # Recorrido del último turno: army_id → tiles pisados en orden (posición
     # inicial primero, retirada incluida). Lo consume la UI para animar el
     # movimiento; transitorio como last_battles, no se serializa.
@@ -131,6 +138,8 @@ class Game:
     def run_turn(self, orders: list[Order]) -> VictoryResult:
         """Ejecuta un turno completo y devuelve el estado de victoria."""
         self.last_battles.clear()
+        self.last_clashes.clear()
+        self.last_retreats.clear()
         self.last_moves.clear()
         self._apply_orders(orders)
         self._move_armies()
@@ -208,6 +217,7 @@ class Game:
                 self.config["batalla"], self.rng,
             )
             self.last_battles.append((defender.position, result.outcome.name))
+            self.last_clashes.append((attacker.id, defender.id))
             self.players[attacker.owner].troops_lost += attacker.apply_losses(
                 result.attacker_losses
             )
@@ -226,9 +236,15 @@ class Game:
         self._battle_queue.clear()
 
     def _retreat(self, army: Army, enemy_pos: Coord) -> None:
-        """Mueve al ejército al tile vecino libre más alejado del enemigo."""
+        """Mueve al ejército al tile vecino libre más alejado del enemigo.
+
+        La retirada solo ocurre en campo abierto: un ejército dentro de un
+        fuerte mantiene la posición aunque pierda (defiende hasta el final).
+        """
         if army.is_destroyed:
             return
+        if self.world.fort_at(army.position) is not None:
+            return  # atrincherado: no abandona el fuerte
         options = [
             pos for pos in self.world.neighbors(army.position) if self.army_at(pos) is None
         ]
@@ -238,6 +254,7 @@ class Game:
         destination = self.rng.choice(
             [pos for pos in options if _manhattan(pos, enemy_pos) == far]
         )
+        self.last_retreats.add(army.id)
         self._record_move(army.id, army.position, destination)
         army.position = destination
 

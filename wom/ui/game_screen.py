@@ -12,8 +12,13 @@ Interacción:
   HUD ofrece "Crear ejército" (toma tropas de la reserva del fuerte).
 - Click derecho: borra el camino trazado y deselecciona.
 - Botón "Fin del turno" o Enter: ejecuta el turno (humano + AI). El
-  movimiento resultante se anima de forma fluida (Enter/Espacio/click la
-  saltea); el resto del input queda bloqueado mientras tanto.
+  movimiento resultante se anima de forma fluida y las batallas muestran
+  ambos bandos chocando con un destello (Enter/Espacio/click saltea la
+  animación); el resto del input queda bloqueado mientras tanto.
+
+Al empezar una partida nueva, anillos esfumados señalan durante unos
+segundos dónde está el ejército inicial del jugador (se apagan solos, al
+seleccionarlo o al terminar el primer turno).
 - Botón "Guardar" o tecla G: guarda la partida en saves/ con timestamp.
 - ESC: pide confirmación antes de volver al menú (la partida no guardada se
   pierde); con la partida ya terminada sale directo.
@@ -31,7 +36,11 @@ from wom.core.victory import VictoryResult
 from wom.core.worldmap import Coord
 from wom.persistence.savegame import save_game
 from wom.ui import scale, theme
-from wom.ui.animation import TurnAnimation, build_turn_animation
+from wom.ui.animation import (
+    TurnAnimation,
+    build_turn_animation,
+    spawn_highlight_rings,
+)
 from wom.ui.assets import Assets
 from wom.ui.hud import Hud
 from wom.ui.renderer import MapRenderer
@@ -59,6 +68,12 @@ class GameScreen:
         self.notice_until = 0
         self.animation: TurnAnimation | None = None
         self.animation_start = 0  # ticks de pygame al iniciar la animación
+        # Resaltado del ejército inicial: solo en partidas nuevas (turno 0),
+        # para que el jugador encuentre rápido por dónde empieza.
+        self.spawn_highlights: list[Coord] = (
+            [a.position for a in game.armies_of(human_id)] if game.turn == 0 else []
+        )
+        self.spawn_highlight_start = pygame.time.get_ticks()
         # Fusión pendiente de confirmar: (source_id, target_id). Mientras
         # exista se muestra el diálogo modal y se bloquea el resto del input.
         self.pending_merge: tuple[int, int] | None = None
@@ -168,6 +183,7 @@ class GameScreen:
             else:
                 self.selected_id = occupant.id
                 self.selected_fort = None
+                self.spawn_highlights = []  # ya encontró su ejército
             return
         if self.selected_id is not None:
             army = self.game.army_by_id(self.selected_id)
@@ -274,6 +290,7 @@ class GameScreen:
     def end_turn(self) -> None:
         self.animation = None  # descarta una animación anterior si la hubiera
         self.pending_merge = None
+        self.spawn_highlights = []  # con el juego en marcha ya no hace falta
         orders: list[Order] = [
             CreateArmyOrder(position=pos) for pos in self.pending_creations
         ]
@@ -299,17 +316,35 @@ class GameScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(theme.BACKGROUND)
         animating = self.animating  # una sola lectura del reloj por frame
+        elapsed = self._animation_elapsed() if animating else 0.0
+        # Hasta que el choque de batalla revela el resultado, las cruces de
+        # los muertos del turno no se muestran.
+        revealed = not animating or self.animation.result_revealed(elapsed)
         self.renderer.draw(
             surface, self.game, self.selected_id, self.pending_paths,
             self.selected_fort, self.pending_creations, hide_armies=animating,
+            hide_new_crosses=not revealed,
         )
         if animating:
-            for motion, pos in self.animation.positions(self._animation_elapsed()):
+            for motion, pos in self.animation.positions(elapsed):
                 self.renderer.draw_army_at(
                     surface, motion.owner, motion.class_id, motion.troops, pos
                 )
+            for point, intensity in self.animation.clash_effects(elapsed):
+                self.renderer.draw_clash(surface, point, intensity)
         elif self.animation is not None:
             self.animation = None  # terminó: vuelve el dibujo normal
+        if self.spawn_highlights:
+            rings = spawn_highlight_rings(
+                (pygame.time.get_ticks() - self.spawn_highlight_start) / 1000.0
+            )
+            if rings:
+                for pos in self.spawn_highlights:
+                    self.renderer.draw_tile_rings(
+                        surface, pos, rings, theme.SPAWN_HIGHLIGHT
+                    )
+            else:
+                self.spawn_highlights = []  # cumplió su tiempo
         selected = (
             self.game.army_by_id(self.selected_id) if self.selected_id is not None else None
         )

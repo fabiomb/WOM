@@ -44,6 +44,36 @@ def test_render_inicial(screen, game_screen):
     game_screen.draw(screen)  # no debe lanzar
 
 
+def test_resaltado_del_ejercito_inicial(screen, game_screen):
+    army = game_screen.game.armies_of(0)[0]
+    assert army.position in game_screen.spawn_highlights  # partida nueva
+    game_screen.draw(screen)  # dibuja los anillos sin romper
+    _click(game_screen, game_screen.renderer.tile_center(army.position))
+    assert game_screen.spawn_highlights == []  # encontrado: se apaga
+
+
+def test_animacion_de_choque_en_batalla(screen, game_screen):
+    game = game_screen.game
+    a = game.armies_of(0)[0]
+    enemy_pos = next(
+        pos for pos in game.world.neighbors(a.position)
+        if game.army_at(pos) is None and game.world.fort_at(pos) is None
+    )
+    b = game.spawn_army(1, enemy_pos, {"soldado": 100})
+    game_screen.pending_paths[a.id] = [enemy_pos]
+    game_screen.end_turn()
+    assert game.last_clashes == [(a.id, b.id)]
+    anim = game_screen.animation
+    assert anim is not None and anim.clash_points
+
+    # plantar el reloj en plena fase de choque y dibujar el destello
+    in_clash = anim.move_duration + 0.3
+    game_screen.animation_start = pygame.time.get_ticks() - int(in_clash * 1000)
+    assert game_screen.animating
+    assert anim.clash_effects(in_clash)
+    game_screen.draw(screen)  # ejércitos embistiendo + destello sin romper
+
+
 def test_seleccion_y_path_por_clicks(screen, game_screen):
     game = game_screen.game
     army = game.armies_of(0)[0]

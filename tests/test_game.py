@@ -58,6 +58,36 @@ def test_last_moves_incluye_la_retirada():
         assert moves[0] == (4, 1) and moves[-1] == b.position != (4, 1)
 
 
+def test_no_hay_retirada_dentro_de_un_fuerte():
+    game = _make_game()
+    game.config["batalla"]["sigma_aleatoriedad"] = 0.0  # resultado determinista
+    fort = Fort(position=(3, 1), owner=1)
+    game.world.forts.append(fort)
+    attacker = game.spawn_army(0, (2, 1), {"soldado": 100})
+    defender = game.spawn_army(1, (3, 1), {"soldado": 50})
+    game.run_turn([MoveOrder(army_id=attacker.id, path=((3, 1),))])
+    # ratio ~1.33 => DEFENDER_RETREATS, pero está atrincherado: no se mueve
+    assert defender in game.armies  # sobrevivió a la batalla
+    assert defender.position == (3, 1)  # perdió pero mantiene el fuerte
+    assert defender.id not in game.last_retreats
+    assert fort.owner == 1  # el atacante no pudo entrar a capturar
+
+
+def test_choques_y_retiradas_del_turno_quedan_registrados():
+    game = _make_game()
+    game.config["batalla"]["sigma_aleatoriedad"] = 0.0  # resultado determinista
+    a = game.spawn_army(0, (2, 1), {"soldado": 100})
+    b = game.spawn_army(1, (4, 1), {"soldado": 40})
+    game.run_turn([MoveOrder(army_id=a.id, path=((3, 1), (4, 1)))])
+    # ratio 2.5 => ATTACKER_WINS; el defensor sobrevive (65% de bajas) y huye
+    assert game.last_clashes == [(a.id, b.id)]
+    assert b in game.armies
+    assert b.id in game.last_retreats
+    assert b.position != (4, 1)
+    game.run_turn([])  # sin batallas: los registros transitorios se limpian
+    assert game.last_clashes == [] and game.last_retreats == set()
+
+
 def test_encuentro_detiene_y_pelea():
     game = _make_game()
     a = game.spawn_army(0, (2, 1), {"soldado": 50})

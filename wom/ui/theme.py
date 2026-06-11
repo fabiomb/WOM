@@ -21,6 +21,9 @@ PATH_ONGOING = (120, 120, 120)   # órdenes de turnos anteriores en curso
 BUTTON_BG = (60, 110, 60)
 BUTTON_BG_OVER = (80, 140, 80)
 GAMEOVER_BG = (0, 0, 0, 180)
+SPAWN_HIGHLIGHT = (250, 220, 60)  # anillos que señalan el ejército inicial
+CLASH_FLASH = (255, 200, 90)      # destello exterior del choque de batalla
+CLASH_CORE = (255, 245, 210)      # núcleo del destello
 
 
 FLAG_ICONS = {0: "flag_red", 1: "flag_blue"}  # asset de bandera por dueño
