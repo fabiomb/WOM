@@ -118,6 +118,19 @@ $env:PYTHONPATH='D:\dev\WOM'; .venv\Scripts\python tools\screenshot_m2.py
 
 Los scripts de `tools/` necesitan la raíz del proyecto en `PYTHONPATH`.
 
+## Build distribuible
+
+```bash
+pip install pyinstaller
+pyinstaller wom.spec    # genera dist/wom/ (ejecutable + data/ adentro)
+```
+
+El bundle es portable: `saves/` y `settings.json` se crean junto al
+ejecutable. PyInstaller no cruza plataformas: el build de Linux se hace en
+Linux — el workflow de GitHub Actions
+([`build.yml`](.github/workflows/build.yml)) corre los tests y construye los
+artefactos de Windows y Linux al taguear `v*` o ejecutándolo a mano.
+
 ## Autor
 
 **Fabio Baccaglioni** — <fabiomb@gmail.com>

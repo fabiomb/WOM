@@ -12,7 +12,9 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-SETTINGS_PATH = Path(__file__).resolve().parents[2] / "settings.json"
+from wom.paths import user_root
+
+SETTINGS_PATH = user_root() / "settings.json"
 DEFAULT_MUSIC_FOLDER = "data/music"
 
 

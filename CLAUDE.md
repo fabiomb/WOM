@@ -46,7 +46,9 @@ Key invariants:
 
 ## Roadmap status
 
-M1 (core + basic AI + headless), M2 (playable pygame UI: map render, mouse orders with auto-pathing and waypoints, end turn, game-over overlay), M3 (objective-scoring AI with three validated difficulty levels) and M4 (main menu + savegames) are **done** and tested. `main.py` opens the menu (`wom/ui/menu_screen.py`): new game (AI level, map size, victory mode), load game, quit; in-game saving via HUD button or G key, ESC returns to the menu. Remaining milestone: M5 (PyInstaller builds). Milestones defined in `docs/especificaciones.md` §8. v1 explicitly excludes: tactical battle zoom, map editor, multiplayer.
+All v1 milestones (M1–M6, defined in `docs/especificaciones.md` §8) are **done** and tested: core + headless (M1), playable pygame UI (M2), three validated AI levels (M3), menu + savegames (M4), gameplay/presentation polish — cover art menu, army merging, music, sound/video options (M5), and distributable builds (M6). `main.py` opens the menu (`wom/ui/menu_screen.py`); in-game saving via HUD button or G key, ESC asks for confirmation and returns to the menu. v1 explicitly excludes: tactical battle zoom, map editor, multiplayer.
+
+Builds: `pyinstaller wom.spec` produces `dist/wom/` (onedir, windowed exe). All resource paths go through `wom/paths.py`: read-only `data/` resolves into the bundle (`sys._MEIPASS`) when frozen, writable `saves/` + `settings.json` sit next to the executable. `.github/workflows/build.yml` tests and builds Windows + Linux artifacts on `v*` tags or manually (PyInstaller can't cross-compile; the Linux build runs on ubuntu-latest).
 
 Battle semantics: combat triggers when an army tries to *enter* an enemy's tile — armies never share a tile; each side fights from its own tile (own terrain bonus, defender gets fort/town bonus). Attacker classes with `ignora_bonus_fort` in `classes.json` (the arquero) cancel the defender's fort bonus for their own contribution — they fight the fort's garrison 1:1. Losers/retreaters fall back one tile.
 

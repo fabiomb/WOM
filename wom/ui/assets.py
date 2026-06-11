@@ -11,8 +11,9 @@ from pathlib import Path
 import pygame
 
 from wom.core.worldmap import Terrain
+from wom.paths import resource_root
 
-ASSETS_DIR = Path(__file__).resolve().parents[2] / "data" / "assets"
+ASSETS_DIR = resource_root() / "data" / "assets"
 
 UNIT_IDS = ("partisano", "soldado", "caballero", "arquero")
 ICON_IDS = ("fort", "town", "flag", "flag_red", "flag_blue", "cross")

@@ -19,9 +19,9 @@ from pathlib import Path
 import pygame
 from pygame import mixer
 
+from wom.paths import resource_root
 from wom.persistence.settings import Settings, load_settings, save_settings
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MUSIC_EXTENSIONS = (".mp3", ".ogg")
 MUSIC_END_EVENT = pygame.event.custom_type()  # fin del tema en reproducción
 
@@ -61,7 +61,7 @@ class MusicPlayer:
     def folder_path(self) -> Path:
         """Carpeta de música resuelta (las relativas cuelgan del proyecto)."""
         folder = Path(self.settings.music_folder)
-        return folder if folder.is_absolute() else PROJECT_ROOT / folder
+        return folder if folder.is_absolute() else resource_root() / folder
 
     def reload_folder(self) -> None:
         """Rearma la playlist desde la carpeta de settings."""

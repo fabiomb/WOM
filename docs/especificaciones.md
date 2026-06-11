@@ -187,7 +187,10 @@ WOM/
 | M2 | UI mínima: render del mapa, dar órdenes con mouse, fin de turno | Partida humano vs AI fácil jugable |
 | M3 | AI media y difícil, balance de clases vía config | AI vs AI masivo, ajuste de parámetros |
 | M4 | Menú completo, guardar/cargar, placeholders definitivos | Partida completa de punta a punta |
-| M5 | Build distribuible Windows (PyInstaller) y Linux (CI o WSL2) | Ejecutable corre en máquina limpia |
+| M5 | Jugabilidad y presentación: portada, arte, fusión de ejércitos, animaciones, música, opciones de sonido/video | Verificación visual + suite de tests |
+| M6 | Build distribuible Windows (PyInstaller) y Linux (GitHub Actions) | Ejecutable corre en máquina limpia |
+
+Estado: M1 a M6 completados. El build se genera con `pyinstaller wom.spec` (onedir en `dist/wom/`); el workflow `.github/workflows/build.yml` corre los tests y construye los artefactos de Windows y Linux al taguear `v*` (o a demanda). El bundle lleva `data/` adentro y escribe `saves/` y `settings.json` junto al ejecutable (`wom/paths.py`).
 
 Fuera de alcance v1 (explícito en idea.md): zoom de batalla táctica, editor de mapas, multiplayer.
 
@@ -195,7 +198,7 @@ Fuera de alcance v1 (explícito en idea.md): zoom de batalla táctica, editor de
 
 | Riesgo | Impacto | Mitigación |
 |---|---|---|
-| Build Linux desde Windows | Medio | WSL2 o GitHub Actions; decidir en M5 |
+| Build Linux desde Windows | Medio | Resuelto en M6: GitHub Actions (matrix windows/ubuntu) |
 | Balance de clases | Medio | Todo en config + simulación AI vs AI masiva |
 | Scope creep hacia v2 | Alto | Roadmap cerrado; zoom/editor/multiplayer explícitamente fuera de v1 |
 | Rendimiento de render con mapas grandes | Bajo | Render por dirty-rects o por viewport; mapas v1 acotados |

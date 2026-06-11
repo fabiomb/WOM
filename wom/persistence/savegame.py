@@ -13,9 +13,10 @@ from datetime import datetime
 from pathlib import Path
 
 from wom.core.game import Game
+from wom.paths import user_root
 
 SAVE_FORMAT_VERSION = 1
-SAVES_DIR = Path(__file__).resolve().parents[2] / "saves"
+SAVES_DIR = user_root() / "saves"
 
 
 def save_game(game: Game, name: str | None = None, directory: Path | None = None) -> Path:

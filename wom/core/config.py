@@ -6,7 +6,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "config"
+from wom.paths import resource_root
+
+CONFIG_DIR = resource_root() / "data" / "config"
 
 
 @dataclass(frozen=True)
