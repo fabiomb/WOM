@@ -179,9 +179,9 @@ class Game:
             points = army.speed(self.classes)
             while army.path and points > 0:
                 step = army.path[0]
-                if not self.world.is_passable(step) or not _adjacent(army.position, step):
-                    army.path.clear()  # path inválido: se descarta
-                    break
+                if not self.world.can_step(army.position, step):
+                    army.path.clear()  # path inválido (incluye salir de un
+                    break               # puente por el lateral): se descarta
                 cost = terrain_costs[self.world.terrain_at(step).value]
                 if cost > points:
                     break  # sin puntos para este tile; sigue el próximo turno

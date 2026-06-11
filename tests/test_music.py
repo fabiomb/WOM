@@ -171,11 +171,11 @@ def test_settings_roundtrip(tmp_path):
 
 
 def test_parse_resolution():
-    from wom.ui.video import parse_resolution
+    from wom.ui.video import DEFAULT_RESOLUTION, parse_resolution
 
     assert parse_resolution("1920x1080") == (1920, 1080)
     assert parse_resolution("1280X720") == (1280, 720)  # mayúscula también
-    assert parse_resolution("basura") == (1280, 720)  # inválido: default
+    assert parse_resolution("basura") == DEFAULT_RESOLUTION  # inválido: default
 
 
 def test_settings_rotos_o_ausentes_usan_defaults(tmp_path):

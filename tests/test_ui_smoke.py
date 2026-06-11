@@ -312,8 +312,12 @@ def test_menu_opciones(screen, tmp_path):
     _click_menu(menu, "video")
     assert menu.mode == "video"
     menu.draw(screen)
-    _click_menu(menu, "video_res")  # 1280x720 → 1600x900
-    assert player.settings.video_resolution == "1600x900"
+    from wom.ui.video import RESOLUTIONS
+
+    start = player.settings.video_resolution
+    expected = RESOLUTIONS[(RESOLUTIONS.index(start) + 1) % len(RESOLUTIONS)]
+    _click_menu(menu, "video_res")  # cicla a la resolución siguiente
+    assert player.settings.video_resolution == expected
     _click_menu(menu, "video_max")
     assert player.settings.video_maximized is True
     menu.draw(screen)
@@ -327,7 +331,7 @@ def test_menu_opciones(screen, tmp_path):
 
     saved = load_settings(tmp_path / "settings.json")  # todo quedó persistido
     assert saved.music_volume == 0.8 and saved.music_shuffle is False
-    assert saved.video_resolution == "1600x900" and saved.video_maximized is True
+    assert saved.video_resolution == expected and saved.video_maximized is True
 
 
 def test_reproductor_modal_con_m(screen, tmp_path):

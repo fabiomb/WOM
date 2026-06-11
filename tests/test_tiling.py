@@ -50,21 +50,41 @@ def test_puente_cuenta_como_agua():
         "whw",
         "ppp",
     ])
-    assert water_tile(world, (0, 1)) in ("water_n", "water_s")  # canal: fallback
+    assert water_tile(world, (0, 1)) == "water_ns"  # canal: el puente es agua
     world_sin_puente = _world([
         "ppp",
         "wpw",
         "ppp",
     ])
-    # 3 costas (sin asset exacto): cae a la esquina más parecida
-    assert water_tile(world_sin_puente, (0, 1)) == "water_ne"
+    # 3 costas con salida al oeste (el borde del mapa cuenta como agua)
+    assert water_tile(world_sin_puente, (0, 1)) == "water_u_w"
 
 
-def test_canal_angosto_usa_fallback_determinista():
-    world = _world([
+def test_canales_de_rio():
+    horizontal = _world([
         "ppp",
         "www",
         "ppp",
     ])
-    # canal horizontal (costa N y S, sin asset exacto): variante consistente
-    assert water_tile(world, (1, 1)) == water_tile(world, (0, 1)) is not None
+    assert water_tile(horizontal, (1, 1)) == "water_ns"  # costa N y S
+    vertical = _world([
+        "pwp",
+        "pwp",
+        "pwp",
+    ])
+    assert water_tile(vertical, (1, 1)) == "water_ew"  # costa E y O
+
+
+def test_agua_en_u_con_salida_a_cada_punto_cardinal():
+    # lago en cruz: cada punta tiene tres costas y la salida hacia el centro
+    world = _world([
+        "ppppp",
+        "ppwpp",
+        "pwwwp",
+        "ppwpp",
+        "ppppp",
+    ])
+    assert water_tile(world, (2, 1)) == "water_u_s"  # salida al sur (al centro)
+    assert water_tile(world, (2, 3)) == "water_u_n"
+    assert water_tile(world, (1, 2)) == "water_u_e"
+    assert water_tile(world, (3, 2)) == "water_u_w"

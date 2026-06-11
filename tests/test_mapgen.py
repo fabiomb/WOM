@@ -100,6 +100,27 @@ def test_los_rios_tienen_puentes():
     assert bridges > 0  # los vados de los ríos ahora son puentes
 
 
+def test_los_puentes_nunca_terminan_en_agua():
+    """Un puente se extiende de orilla a orilla: sobre su eje de cruce los
+    vecinos son tierra u otro tramo de puente, jamás agua."""
+    for seed in range(8):
+        _, world = _gen(seed)
+        for y in range(world.height):
+            for x in range(world.width):
+                tile = world.tiles[y][x]
+                if tile is Terrain.BRIDGE_H:
+                    ends = [(x - 1, y), (x + 1, y)]
+                elif tile is Terrain.BRIDGE_V:
+                    ends = [(x, y - 1), (x, y + 1)]
+                else:
+                    continue
+                for end in ends:
+                    if world.in_bounds(end):
+                        assert world.terrain_at(end) is not Terrain.WATER, (
+                            f"seed {seed}: puente cortado en {(x, y)}"
+                        )
+
+
 def test_puentes_son_transitables():
     from wom.core.worldmap import WorldMap
 
@@ -108,6 +129,36 @@ def test_puentes_son_transitables():
     world = WorldMap(width=3, height=3, tiles=tiles)
     assert world.is_passable((1, 1))
     assert not world.is_passable((0, 0))
+
+
+def test_puente_es_tunel_de_un_solo_eje():
+    from wom.core.worldmap import WorldMap
+
+    # puente horizontal rodeado de tierra: aún así solo conecta este-oeste
+    tiles = [[Terrain.PLAINS] * 3 for _ in range(3)]
+    tiles[1][1] = Terrain.BRIDGE_H
+    world = WorldMap(width=3, height=3, tiles=tiles)
+    assert world.can_step((1, 1), (0, 1)) and world.can_step((1, 1), (2, 1))
+    assert not world.can_step((1, 1), (1, 0))  # no se sale por el lateral
+    assert not world.can_step((1, 1), (1, 2))
+    assert not world.can_step((1, 0), (1, 1))  # tampoco se entra
+    assert sorted(world.neighbors((1, 1))) == [(0, 1), (2, 1)]
+
+
+def test_puentes_contiguos_no_se_conectan_lateralmente():
+    from wom.core.worldmap import WorldMap
+
+    # dos puentes horizontales apilados: túneles paralelos independientes
+    tiles = [[Terrain.PLAINS] * 3 for _ in range(3)]
+    tiles[1][1] = Terrain.BRIDGE_H
+    tiles[2][1] = Terrain.BRIDGE_H
+    world = WorldMap(width=3, height=3, tiles=tiles)
+    assert not world.can_step((1, 1), (1, 2))
+    # un puente vertical sí conecta norte-sur
+    tiles[2][1] = Terrain.PLAINS
+    tiles[1][1] = Terrain.BRIDGE_V
+    assert world.can_step((1, 1), (1, 2)) and world.can_step((1, 1), (1, 0))
+    assert not world.can_step((1, 1), (0, 1))
 
 
 def test_serializacion_ida_y_vuelta():

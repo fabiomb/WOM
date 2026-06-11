@@ -198,6 +198,24 @@ def test_movimiento_cruza_puentes():
     assert army.position == (4, 1)  # el puente cuesta 1: cruzó entero
 
 
+def test_no_se_escapa_de_un_puente_por_el_lateral():
+    game = _make_game()
+    # río vertical en x=3, puente en (3, 1) y tierra al norte en (3, 0)
+    for y in range(game.world.height):
+        game.world.tiles[y][3] = Terrain.WATER
+    game.world.tiles[1][3] = Terrain.BRIDGE_H
+    game.world.tiles[0][3] = Terrain.PLAINS
+
+    on_bridge = game.spawn_army(0, (3, 1), {"soldado": 10})
+    game.run_turn([MoveOrder(army_id=on_bridge.id, path=((3, 0),))])
+    assert on_bridge.position == (3, 1)  # la orden lateral se descartó
+    assert on_bridge.path == []
+
+    on_land = game.spawn_army(0, (3, 0), {"soldado": 10})
+    game.run_turn([MoveOrder(army_id=on_land.id, path=((3, 1),))])
+    assert on_land.position == (3, 0)  # tampoco se entra por el lateral
+
+
 def test_fusion_de_ejercitos():
     game = _make_game()
     a = game.spawn_army(0, (2, 1), {"soldado": 30, "arquero": 10})

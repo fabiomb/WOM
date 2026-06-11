@@ -1,4 +1,8 @@
-"""Tests del escalado lógico → ventana (wom/ui/scale.py)."""
+"""Tests del escalado lógico → ventana (wom/ui/scale.py).
+
+Independientes de la resolución lógica concreta: todo se expresa relativo
+a theme.WINDOW_SIZE.
+"""
 
 import os
 
@@ -9,6 +13,8 @@ import pytest
 
 from wom.ui import scale, theme
 
+LOGICAL_W, LOGICAL_H = theme.WINDOW_SIZE
+
 
 @pytest.fixture(autouse=True)
 def transform_en_identidad():
@@ -18,19 +24,19 @@ def transform_en_identidad():
 
 
 def test_escala_doble():
-    scale.update((2560, 1440))  # 2x exacto, sin bandas
-    assert scale.to_logical((2560, 1440)) == (1280, 720)
+    scale.update((LOGICAL_W * 2, LOGICAL_H * 2))  # 2x exacto, sin bandas
+    assert scale.to_logical((LOGICAL_W * 2, LOGICAL_H * 2)) == (LOGICAL_W, LOGICAL_H)
     assert scale.to_logical((640, 360)) == (320, 180)
 
 
 def test_bandas_laterales():
-    scale.update((1920, 720))  # limita el alto: escala 1.0, bandas de 320
+    scale.update((LOGICAL_W + 640, LOGICAL_H))  # escala 1.0, bandas de 320
     assert scale.to_logical((320, 0)) == (0, 0)
-    assert scale.to_logical((320 + 1280, 720)) == (1280, 720)
+    assert scale.to_logical((320 + LOGICAL_W, LOGICAL_H)) == (LOGICAL_W, LOGICAL_H)
 
 
 def test_translate_event():
-    scale.update((2560, 1440))
+    scale.update((LOGICAL_W * 2, LOGICAL_H * 2))
     click = pygame.event.Event(
         pygame.MOUSEBUTTONDOWN, {"pos": (200, 100), "button": 1}
     )
@@ -52,12 +58,13 @@ def test_translate_event_es_identidad_sin_escala():
 def test_present_escala_con_bandas():
     canvas = pygame.Surface(theme.WINDOW_SIZE)
     canvas.fill((200, 0, 0))
-    window = pygame.Surface((1920, 720))  # más ancha que 16:9
+    window = pygame.Surface((LOGICAL_W + 640, LOGICAL_H))  # más ancha
     window.fill((1, 2, 3))  # debe quedar tapado por bandas + contenido
     scale.present(window, canvas)
-    assert window.get_at((0, 360))[:3] == (0, 0, 0)      # banda izquierda
-    assert window.get_at((960, 360))[:3] == (200, 0, 0)  # centro: contenido
-    assert window.get_at((1919, 360))[:3] == (0, 0, 0)   # banda derecha
+    assert window.get_at((0, LOGICAL_H // 2))[:3] == (0, 0, 0)  # banda izquierda
+    center = window.get_at(((LOGICAL_W + 640) // 2, LOGICAL_H // 2))
+    assert center[0] > 150 and center[1] == 0  # centro: contenido rojo
+    assert window.get_at((LOGICAL_W + 639, LOGICAL_H // 2))[:3] == (0, 0, 0)
 
 
 def test_present_sin_escala_copia_directo():
@@ -65,5 +72,5 @@ def test_present_sin_escala_copia_directo():
     canvas.fill((0, 200, 0))
     window = pygame.Surface(theme.WINDOW_SIZE)
     scale.present(window, canvas)
-    assert window.get_at((640, 360))[:3] == (0, 200, 0)
+    assert window.get_at((LOGICAL_W // 2, LOGICAL_H // 2))[:3] == (0, 200, 0)
     assert scale.to_logical((100, 100)) == (100, 100)  # identidad

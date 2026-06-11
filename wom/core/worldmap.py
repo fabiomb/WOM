@@ -66,11 +66,33 @@ class WorldMap:
     def town_at(self, pos: Coord) -> Town | None:
         return next((t for t in self.towns if t.position == pos), None)
 
+    def can_step(self, origin: Coord, dest: Coord) -> bool:
+        """¿Es válido un paso de `origin` a `dest` (tiles adyacentes)?
+
+        Los puentes son túneles de un solo eje: BRIDGE_H conecta solamente
+        este-oeste y BRIDGE_V solamente norte-sur, tanto para entrar como
+        para salir — no se puede salir por el lateral aunque haya tierra u
+        otro puente en el casillero contiguo.
+        """
+        if not (self.is_passable(origin) and self.is_passable(dest)):
+            return False
+        dx = dest[0] - origin[0]
+        dy = dest[1] - origin[1]
+        if abs(dx) + abs(dy) != 1:
+            return False
+        for tile in (self.terrain_at(origin), self.terrain_at(dest)):
+            if tile is Terrain.BRIDGE_H and dx == 0:
+                return False
+            if tile is Terrain.BRIDGE_V and dy == 0:
+                return False
+        return True
+
     def neighbors(self, pos: Coord) -> list[Coord]:
-        """Vecinos transitables en 4 direcciones."""
+        """Vecinos alcanzables en un paso (transitables y, en puentes,
+        respetando el eje del túnel)."""
         x, y = pos
         candidates = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-        return [c for c in candidates if self.is_passable(c)]
+        return [c for c in candidates if self.can_step(pos, c)]
 
     def to_dict(self) -> dict:
         """Serialización a dict (para savegames y futuro editor de mapas).

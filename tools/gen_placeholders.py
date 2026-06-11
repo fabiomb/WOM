@@ -7,8 +7,9 @@ arte final ya instalado.
 Convención de tamaños (el arte final reemplaza archivos con el mismo
 nombre y dimensiones):
 - Tiles de terreno: 64x64 px (plains, forest, mountain, water, bridge_h,
-  bridge_v, y las 9 variantes de costa del agua: water_n/s/e/w,
-  water_ne/nw/se/sw y water_single — ver wom/ui/tiling.py)
+  bridge_v, y las 15 variantes de costa del agua: water_n/s/e/w,
+  water_ne/nw/se/sw, los canales water_ns/water_ew, las U water_u_n/s/e/w
+  y water_single — ver wom/ui/tiling.py)
 - Unidades/ejércitos: 48x48 px (una por clase: partisano, soldado,
   caballero, arquero) — color de fondo según jugador se aplica en runtime.
 - Íconos: 32x32 px (fort, town, cruz de ejército muerto, y las banderas:
@@ -60,6 +61,12 @@ WATER_EDGES = {
     "water_nw": ("n", "w"),
     "water_se": ("s", "e"),
     "water_sw": ("s", "w"),
+    "water_ns": ("n", "s"),      # canal horizontal (río E-O)
+    "water_ew": ("e", "w"),      # canal vertical (río N-S)
+    "water_u_n": ("s", "e", "w"),  # en U con salida al norte
+    "water_u_s": ("n", "e", "w"),  # en U con salida al sur
+    "water_u_e": ("n", "s", "w"),  # en U con salida al este
+    "water_u_w": ("n", "s", "e"),  # en U con salida al oeste
     "water_single": ("n", "s", "e", "w"),
 }
 SHORE_COLOR = (205, 185, 140)  # arena de la orilla
