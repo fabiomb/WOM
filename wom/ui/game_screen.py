@@ -3,7 +3,8 @@
 Interacción:
 - Click izquierdo en un ejército propio: lo selecciona.
 - Con un ejército seleccionado, click izquierdo en el mapa: traza el camino
-  mínimo hasta ese tile (clicks sucesivos agregan waypoints).
+  mínimo hasta ese tile (clicks sucesivos agregan waypoints). Otro click en
+  el mismo ejército (o ESC) confirma la ruta y deselecciona.
 - Shift+click en un ejército propio: lo elige para fusionar; shift+click en
   otro propio aledaño abre la confirmación y, si se acepta, se fusionan en
   uno (ver Game.merge_armies).
@@ -114,6 +115,11 @@ class GameScreen:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             if self.game_over:
                 self.wants_menu = True  # partida terminada: sale directo
+            elif self.selected_id is not None or self.selected_fort is not None:
+                # Primero deselecciona (la ruta trazada queda confirmada);
+                # otro ESC recién abre el diálogo de salida.
+                self.selected_id = None
+                self.selected_fort = None
             else:
                 self.pending_quit = True  # en juego: pide confirmación
             return
@@ -155,8 +161,13 @@ class GameScreen:
             return
         occupant = self.game.army_at(tile)
         if occupant is not None and occupant.owner == self.human_id:
-            self.selected_id = occupant.id
-            self.selected_fort = None
+            if occupant.id == self.selected_id:
+                # Click en el ya seleccionado: confirma la ruta y deselecciona
+                # (permite después clickear un fuerte sin agregar waypoints).
+                self.selected_id = None
+            else:
+                self.selected_id = occupant.id
+                self.selected_fort = None
             return
         if self.selected_id is not None:
             army = self.game.army_by_id(self.selected_id)

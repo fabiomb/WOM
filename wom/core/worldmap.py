@@ -15,6 +15,8 @@ class Terrain(str, Enum):
     FOREST = "forest"
     MOUNTAIN = "mountain"
     WATER = "water"  # intransitable
+    BRIDGE_H = "bridge_h"  # puente sobre el agua, transitable (tablones E-O)
+    BRIDGE_V = "bridge_v"  # ídem, tablones N-S
 
 
 @dataclass
@@ -122,5 +124,7 @@ TERRAIN_TO_CHAR = {
     Terrain.FOREST: "f",
     Terrain.MOUNTAIN: "m",
     Terrain.WATER: "w",
+    Terrain.BRIDGE_H: "h",
+    Terrain.BRIDGE_V: "v",
 }
 CHAR_TO_TERRAIN = {c: t for t, c in TERRAIN_TO_CHAR.items()}

@@ -187,6 +187,17 @@ def test_captura_de_fuerte_destruye_la_reserva():
     assert fort.reserve_total == 0  # la guarnición enemiga se dispersó
 
 
+def test_movimiento_cruza_puentes():
+    game = _make_game()
+    # río vertical en x=3 con un puente en (3, 1)
+    for y in range(game.world.height):
+        game.world.tiles[y][3] = Terrain.WATER
+    game.world.tiles[1][3] = Terrain.BRIDGE_H
+    army = game.spawn_army(0, (2, 1), {"soldado": 10})  # velocidad 3
+    game.run_turn([MoveOrder(army_id=army.id, path=((3, 1), (4, 1)))])
+    assert army.position == (4, 1)  # el puente cuesta 1: cruzó entero
+
+
 def test_fusion_de_ejercitos():
     game = _make_game()
     a = game.spawn_army(0, (2, 1), {"soldado": 30, "arquero": 10})

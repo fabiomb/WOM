@@ -31,5 +31,5 @@
   },
   "turnos_limite_default": 50,
   "turnos_cruz": 5,
-  "costo_terreno": { "plains": 1, "forest": 2, "mountain": 3 }
+  "costo_terreno": { "plains": 1, "forest": 2, "mountain": 3, "bridge_h": 1, "bridge_v": 1 }
 }

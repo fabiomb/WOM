@@ -104,6 +104,10 @@ class Hud:
                 self.small_font, theme.TEXT_DIM,
             )
             y = self._text(
+                surface, "Click en el ejército o ESC: confirmar ruta", x, y,
+                self.small_font, theme.TEXT_DIM,
+            )
+            y = self._text(
                 surface, "Click derecho: borrar/deseleccionar", x, y,
                 self.small_font, theme.TEXT_DIM,
             )

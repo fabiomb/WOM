@@ -42,7 +42,7 @@ Key invariants:
 - Game balance lives in `data/config/*.json` (unit classes, battle thresholds, AI weights), never hardcoded.
 - Turn phases run in fixed order (see `core/game.py` docstring): orders → movement → battles → capture → production → recovery → victory check.
 - Fort production accumulates in `Fort.reserve`; troops enter the map only via a voluntary `CreateArmyOrder` (or the initial spawn). Production order among a player's forts rotates by turn so captured forts also produce when food is scarce. An army parked on its own fort auto-resupplies from the reserve up to `max_army_size` (food refill costs player stock); an army parked on an own town refills food directly, without touching the stock. Capturing a fort destroys its reserve. Each player's cumulative losses are tracked in `Player.troops_lost` (serialized, shown in the HUD).
-- Placeholder asset sizes are a contract with future final art: tiles 64×64, units 48×48, icons 32×32 (see `tools/gen_placeholders.py`).
+- Placeholder asset sizes are a contract with future final art: tiles 64×64, units 48×48, icons 32×32 (see `tools/gen_placeholders.py`). The script writes `_<name>.png` always (placeholder reference) and `<name>.png` only if missing — running it never overwrites installed final art. Water uses autotiling (`wom/ui/tiling.py`, pure): 9 shore variants (`water_n/s/e/w`, `water_ne/nw/se/sw`, `water_single`) chosen per tile by which orthogonal neighbors are land; bridges (`Terrain.BRIDGE_H/V`, passable, placed by mapgen on rivers instead of fords) count as water for shoreline purposes.
 
 ## Roadmap status
 

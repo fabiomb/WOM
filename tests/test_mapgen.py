@@ -89,6 +89,27 @@ def test_proporciones_de_terreno():
         assert 0.3 * target < share < 1.8 * target, f"{terrain}: {share:.2f}"
 
 
+def test_los_rios_tienen_puentes():
+    bridges = 0
+    for seed in range(5):
+        _, world = _gen(seed)
+        for row in world.tiles:
+            for tile in row:
+                if tile in (Terrain.BRIDGE_H, Terrain.BRIDGE_V):
+                    bridges += 1
+    assert bridges > 0  # los vados de los ríos ahora son puentes
+
+
+def test_puentes_son_transitables():
+    from wom.core.worldmap import WorldMap
+
+    tiles = [[Terrain.WATER] * 3 for _ in range(3)]
+    tiles[1][1] = Terrain.BRIDGE_H
+    world = WorldMap(width=3, height=3, tiles=tiles)
+    assert world.is_passable((1, 1))
+    assert not world.is_passable((0, 0))
+
+
 def test_serializacion_ida_y_vuelta():
     from wom.core.worldmap import WorldMap
 

@@ -6,9 +6,10 @@ import pygame
 
 from wom.core.army import Army
 from wom.core.game import Game
-from wom.core.worldmap import Coord
+from wom.core.worldmap import Coord, Terrain
 from wom.ui import theme
 from wom.ui.assets import Assets
+from wom.ui.tiling import water_tile
 
 
 class MapRenderer:
@@ -23,6 +24,14 @@ class MapRenderer:
             area.y + (area.height - world.height * self.tile_size) // 2,
         )
         self.count_font = pygame.font.SysFont(None, max(14, int(self.tile_size * 0.55)))
+        # El terreno no cambia durante la partida: la variante de costa de
+        # cada tile de agua se calcula una sola vez.
+        self._water_tiles = {
+            (x, y): water_tile(world, (x, y))
+            for y in range(world.height)
+            for x in range(world.width)
+            if world.tiles[y][x] is Terrain.WATER
+        }
 
     # --- coordenadas ------------------------------------------------------
 
@@ -72,7 +81,11 @@ class MapRenderer:
     def _draw_terrain(self, surface: pygame.Surface, game: Game) -> None:
         for y in range(game.world.height):
             for x in range(game.world.width):
-                tile = self.assets.terrain[game.world.tiles[y][x]]
+                variant = self._water_tiles.get((x, y))
+                if variant is not None:
+                    tile = self.assets.water[variant]
+                else:
+                    tile = self.assets.terrain[game.world.tiles[y][x]]
                 surface.blit(tile, self.tile_rect((x, y)))
 
     def _draw_sites(self, surface: pygame.Surface, game: Game) -> None:

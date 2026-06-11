@@ -164,8 +164,9 @@ def _paint_water(world: WorldMap, target: int, rng: random.Random) -> None:
 
 
 def _paint_river(world: WorldMap, rng: random.Random) -> int:
-    """Río serpenteante de borde a borde. Cada pocos tiles deja un vado
-    (tile sin pintar) para que el río no corte el mapa en dos."""
+    """Río serpenteante de borde a borde. Cada pocos tiles pone un puente
+    (perpendicular al curso, transitable) para que el río no corte el mapa
+    en dos."""
     vertical = rng.random() < 0.5
     if vertical:
         x, y = rng.randrange(world.width // 4, 3 * world.width // 4), 0
@@ -180,7 +181,9 @@ def _paint_river(world: WorldMap, rng: random.Random) -> int:
             break
         next_ford -= 1
         if next_ford <= 0:
-            next_ford = rng.randint(3, 6)  # vado: este tile queda transitable
+            next_ford = rng.randint(3, 6)
+            # Puente: cruza el río perpendicular a su curso (transitable).
+            world.tiles[y][x] = Terrain.BRIDGE_H if vertical else Terrain.BRIDGE_V
         elif world.tiles[y][x] is not Terrain.WATER:
             world.tiles[y][x] = Terrain.WATER  # el río atraviesa cualquier terreno
             painted += 1

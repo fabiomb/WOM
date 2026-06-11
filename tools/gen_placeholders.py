@@ -1,8 +1,14 @@
 """Genera los PNG placeholder en data/assets/ para el arte final.
 
+Cada placeholder se guarda siempre como `_<nombre>.png` (referencia) y como
+`<nombre>.png` SOLO si ese archivo no existe: correr el script nunca pisa
+arte final ya instalado.
+
 Convención de tamaños (el arte final reemplaza archivos con el mismo
 nombre y dimensiones):
-- Tiles de terreno: 64x64 px  (plains, forest, mountain, water)
+- Tiles de terreno: 64x64 px (plains, forest, mountain, water, bridge_h,
+  bridge_v, y las 9 variantes de costa del agua: water_n/s/e/w,
+  water_ne/nw/se/sw y water_single — ver wom/ui/tiling.py)
 - Unidades/ejércitos: 48x48 px (una por clase: partisano, soldado,
   caballero, arquero) — color de fondo según jugador se aplica en runtime.
 - Íconos: 32x32 px (fort, town, cruz de ejército muerto, y las banderas:
@@ -44,6 +50,32 @@ FLAGS = {  # 32x32, mástil + paño del color del dueño (ver theme.PLAYER_COLOR
 }
 
 
+# Variantes de costa del agua: nombre → lados con tierra (banda de orilla).
+WATER_EDGES = {
+    "water_n": ("n",),
+    "water_s": ("s",),
+    "water_e": ("e",),
+    "water_w": ("w",),
+    "water_ne": ("n", "e"),
+    "water_nw": ("n", "w"),
+    "water_se": ("s", "e"),
+    "water_sw": ("s", "w"),
+    "water_single": ("n", "s", "e", "w"),
+}
+SHORE_COLOR = (205, 185, 140)  # arena de la orilla
+BRIDGE_WOOD = (130, 90, 50)
+BRIDGE_WOOD_DARK = (95, 65, 35)
+
+
+def _save(surface: pygame.Surface, name: str, out_dir: Path) -> None:
+    """Guarda `_<name>.png` siempre y `<name>.png` solo si no existe
+    (no pisa arte final ya instalado)."""
+    pygame.image.save(surface, str(out_dir / f"_{name}.png"))
+    final = out_dir / f"{name}.png"
+    if not final.exists():
+        pygame.image.save(surface, str(final))
+
+
 def _make(name: str, size: int, color: tuple[int, int, int], out_dir: Path) -> None:
     surface = pygame.Surface((size, size))
     surface.fill(color)
@@ -51,7 +83,7 @@ def _make(name: str, size: int, color: tuple[int, int, int], out_dir: Path) -> N
     font = pygame.font.SysFont(None, size // 2)
     letter = font.render(name[0].upper(), True, (255, 255, 255))
     surface.blit(letter, letter.get_rect(center=surface.get_rect().center))
-    pygame.image.save(surface, str(out_dir / f"{name}.png"))
+    _save(surface, name, out_dir)
 
 
 def _make_flag(name: str, size: int, color: tuple[int, int, int], out_dir: Path) -> None:
@@ -67,7 +99,56 @@ def _make_flag(name: str, size: int, color: tuple[int, int, int], out_dir: Path)
     ]
     pygame.draw.polygon(surface, color, pennant)
     pygame.draw.polygon(surface, (0, 0, 0), pennant, 1)
-    pygame.image.save(surface, str(out_dir / f"{name}.png"))
+    _save(surface, name, out_dir)
+
+
+def _water_base(size: int) -> pygame.Surface:
+    """Base de agua: el arte real de water.png si existe (los bordes y
+    puentes momentáneos pegan con el resto del mapa), si no color plano."""
+    art = ASSETS_DIR / "water.png"
+    if art.exists():
+        return pygame.transform.smoothscale(pygame.image.load(str(art)), (size, size))
+    surface = pygame.Surface((size, size))
+    surface.fill(TILES["water"])
+    return surface
+
+
+def _make_water_edge(name: str, sides: tuple[str, ...], size: int, out_dir: Path) -> None:
+    """Tile de agua con banda de orilla en los lados que tocan tierra."""
+    surface = _water_base(size)
+    band = max(4, size // 7)
+    rects = {
+        "n": pygame.Rect(0, 0, size, band),
+        "s": pygame.Rect(0, size - band, size, band),
+        "e": pygame.Rect(size - band, 0, band, size),
+        "w": pygame.Rect(0, 0, band, size),
+    }
+    for side in sides:
+        pygame.draw.rect(surface, SHORE_COLOR, rects[side])
+    _save(surface, name, out_dir)
+
+
+def _make_bridge(name: str, horizontal: bool, size: int, out_dir: Path) -> None:
+    """Puente de madera sobre agua: tablones perpendiculares al curso."""
+    surface = _water_base(size)
+    span = max(8, size // 2)  # ancho de la pasarela
+    if horizontal:
+        deck = pygame.Rect(0, (size - span) // 2, size, span)
+    else:
+        deck = pygame.Rect((size - span) // 2, 0, span, size)
+    pygame.draw.rect(surface, BRIDGE_WOOD, deck)
+    step = max(4, size // 8)
+    if horizontal:  # tablones verticales (cruzan la pasarela)
+        for x in range(0, size, step):
+            pygame.draw.line(surface, BRIDGE_WOOD_DARK, (x, deck.top), (x, deck.bottom - 1))
+        pygame.draw.line(surface, BRIDGE_WOOD_DARK, (0, deck.top), (size, deck.top), 2)
+        pygame.draw.line(surface, BRIDGE_WOOD_DARK, (0, deck.bottom - 2), (size, deck.bottom - 2), 2)
+    else:
+        for y in range(0, size, step):
+            pygame.draw.line(surface, BRIDGE_WOOD_DARK, (deck.left, y), (deck.right - 1, y))
+        pygame.draw.line(surface, BRIDGE_WOOD_DARK, (deck.left, 0), (deck.left, size), 2)
+        pygame.draw.line(surface, BRIDGE_WOOD_DARK, (deck.right - 2, 0), (deck.right - 2, size), 2)
+    _save(surface, name, out_dir)
 
 
 def main() -> None:
@@ -76,6 +157,10 @@ def main() -> None:
     for group, size in ((TILES, 64), (UNITS, 48), (ICONS, 32)):
         for name, color in group.items():
             _make(name, size, color, ASSETS_DIR)
+    for name, sides in WATER_EDGES.items():
+        _make_water_edge(name, sides, 64, ASSETS_DIR)
+    _make_bridge("bridge_h", True, 64, ASSETS_DIR)
+    _make_bridge("bridge_v", False, 64, ASSETS_DIR)
     for name, color in FLAGS.items():
         _make_flag(name, 32, color, ASSETS_DIR)
     print(f"Placeholders generados en {ASSETS_DIR}")

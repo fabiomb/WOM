@@ -140,6 +140,39 @@ def test_animacion_de_movimiento(screen, game_screen):
     assert game_screen.animation is None
 
 
+def test_confirmar_ruta_con_click_o_esc(screen, game_screen):
+    game = game_screen.game
+    army = game.armies_of(0)[0]
+    # correr el ejército fuera del fuerte para poder clickear el fuerte después
+    army.position = next(
+        (x, y)
+        for y in range(game.world.height)
+        for x in range(game.world.width)
+        if game.world.is_passable((x, y))
+        and game.army_at((x, y)) is None
+        and game.world.fort_at((x, y)) is None
+    )
+    x, y = army.position
+    target = (x + 2, y) if game.world.is_passable((x + 2, y)) else (x, y + 2)
+    _click(game_screen, game_screen.renderer.tile_center(army.position))
+    _click(game_screen, game_screen.renderer.tile_center(target))
+    assert game_screen.pending_paths[army.id]
+
+    # click en el mismo ejército: confirma la ruta y deselecciona
+    _click(game_screen, game_screen.renderer.tile_center(army.position))
+    assert game_screen.selected_id is None
+    assert game_screen.pending_paths[army.id]  # la ruta trazada se conserva
+
+    # ahora sí se puede clickear un fuerte propio (antes era imposible)
+    fort = next(f for f in game.world.forts if f.owner == 0)
+    _click(game_screen, game_screen.renderer.tile_center(fort.position))
+    assert game_screen.selected_fort == fort.position
+
+    # ESC con algo seleccionado deselecciona, sin abrir el diálogo de salida
+    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE}))
+    assert game_screen.selected_fort is None and not game_screen.pending_quit
+
+
 def test_fusion_por_shift_click(screen, game_screen):
     game = game_screen.game
     a = game.armies_of(0)[0]
