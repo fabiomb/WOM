@@ -5,6 +5,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write  # publicar releases con el GITHUB_TOKEN
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -43,3 +46,24 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: dist/wom
+
+      # --- al taguear v*: empaquetar y publicar el release ----------------
+      # En Linux se usa tar.gz para conservar el bit de ejecución del binario.
+      - name: Empaquetar (Linux)
+        if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/')
+        run: tar -czf "wom-${{ github.ref_name }}-linux.tar.gz" -C dist wom
+      - name: Empaquetar (Windows)
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/')
+        run: Compress-Archive -Path dist/wom -DestinationPath "wom-${{ github.ref_name }}-windows.zip"
+      - name: Publicar en el release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        # los dos jobs del matrix corren esto: el primero crea el release
+        # (--generate-notes arma el changelog) y el otro tolera el "ya
+        # existe"; cada uno sube su paquete.
+        run: |
+          gh release create "${{ github.ref_name }}" --verify-tag \
+            --title "WOM ${{ github.ref_name }}" --generate-notes || true
+          gh release upload "${{ github.ref_name }}" wom-${{ github.ref_name }}-* --clobber

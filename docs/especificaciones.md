@@ -191,7 +191,7 @@ WOM/
 | M5 | Jugabilidad y presentación: portada, arte, fusión de ejércitos, animaciones, música, opciones de sonido/video | Verificación visual + suite de tests |
 | M6 | Build distribuible Windows (PyInstaller) y Linux (GitHub Actions) | Ejecutable corre en máquina limpia |
 
-Estado: M1 a M6 completados. El build se genera con `pyinstaller wom.spec` (onedir en `dist/wom/`); el workflow `.github/workflows/build.yml` corre los tests y construye los artefactos de Windows y Linux al taguear `v*` (o a demanda). El bundle lleva `data/` adentro y escribe `saves/` y `settings.json` junto al ejecutable (`wom/paths.py`).
+Estado: M1 a M6 completados. El build se genera con `pyinstaller wom.spec` (onedir en `dist/wom/`); el workflow `.github/workflows/build.yml` corre los tests, construye en Windows y Linux y, al taguear `v*`, **publica el release** con los paquetes adjuntos (`-windows.zip` y `-linux.tar.gz`, este último para conservar el bit de ejecución) y changelog autogenerado. El bundle lleva `data/` adentro y escribe `saves/` y `settings.json` junto al ejecutable (`wom/paths.py`).
 
 Fuera de alcance v1 (explícito en idea.md): zoom de batalla táctica, editor de mapas, multiplayer.
 

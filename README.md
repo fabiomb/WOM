@@ -127,9 +127,19 @@ pyinstaller wom.spec    # genera dist/wom/ (ejecutable + data/ adentro)
 
 El bundle es portable: `saves/` y `settings.json` se crean junto al
 ejecutable. PyInstaller no cruza plataformas: el build de Linux se hace en
-Linux — el workflow de GitHub Actions
-([`build.yml`](.github/workflows/build.yml)) corre los tests y construye los
-artefactos de Windows y Linux al taguear `v*` o ejecutándolo a mano.
+Linux — lo resuelve el workflow de GitHub Actions
+([`build.yml`](.github/workflows/build.yml)). Para publicar una versión
+alcanza con taguear:
+
+```bash
+git tag -a v0.2.0 -m "Versión 0.2.0"
+git push origin v0.2.0
+```
+
+El workflow corre los tests, compila en Windows y Linux, y **publica el
+release automáticamente** con `wom-vX.Y.Z-windows.zip` y
+`wom-vX.Y.Z-linux.tar.gz` adjuntos (tar.gz para conservar el permiso de
+ejecución del binario de Linux) y changelog generado.
 
 ## Autor
 
