@@ -7,7 +7,8 @@ Interacción:
   el mismo ejército (o ESC) confirma la ruta y deselecciona; doble click en
   el destino hace lo mismo en un solo gesto (fija la ruta y libera el foco).
 - Rueda del mouse: zoom in/out anclado al cursor; con zoom, llevar el mouse
-  a los bordes del área de mapa panea la vista (ver wom/ui/camera.py).
+  a los bordes de la ventana panea la vista (ver wom/ui/camera.py), y
+  arrastrar con el botón del medio agarra el mapa y lo desplaza.
 - Shift+click en un ejército propio: lo elige para fusionar; shift+click en
   otro propio aledaño abre el modal de transferencia, donde se elige "Todo"
   o la cantidad por clase que pasa al destino (Game.transfer_troops).
@@ -17,7 +18,8 @@ Interacción:
 - Sin ejército seleccionado, click en un fuerte propio: lo selecciona y el
   HUD ofrece "Crear ejército" (toma tropas de la reserva del fuerte).
 - Click derecho: borra el camino trazado y deselecciona.
-- Botón "Fin del turno" o Enter: ejecuta el turno (humano + AI). El
+- Botón "Fin del turno" o Enter (también el del pad numérico): ejecuta el
+  turno (humano + AI). El
   movimiento resultante se anima de forma fluida y las batallas muestran
   ambos bandos chocando con un destello (Enter/Espacio/click saltea la
   animación); el resto del input queda bloqueado mientras tanto.
@@ -97,6 +99,9 @@ class GameScreen:
         # Doble click que fija la ruta: (ticks, tile) del último click de path.
         self._last_path_click: tuple[int, Coord] | None = None
         self._last_frame_ticks = 0  # para el dt del paneo por bordes
+        # Grab con el botón del medio: última posición del mouse mientras
+        # se arrastra el mapa, o None si no hay arrastre en curso.
+        self._grab_anchor: tuple[int, int] | None = None
 
         # Layout sobre la resolución lógica: la app escala el canvas a la
         # ventana real (scale.present), acá no importa el tamaño físico.
@@ -170,18 +175,39 @@ class GameScreen:
             if event.y:
                 self.renderer.zoom(event.y, scale.mouse_pos())
             return
+        # Grab con el botón del medio: como el zoom, solo mueve la vista,
+        # así que también vale durante la animación o con la partida lista.
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 2:
+            self._grab_anchor = event.pos
+            return
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 2:
+            self._grab_anchor = None
+            return
+        if event.type == pygame.MOUSEMOTION and self._grab_anchor is not None:
+            if not event.buttons[1]:  # se soltó fuera de foco: corta el grab
+                self._grab_anchor = None
+                return
+            dx = event.pos[0] - self._grab_anchor[0]
+            dy = event.pos[1] - self._grab_anchor[1]
+            self.renderer.camera.pan(-dx, -dy)  # el mapa sigue al mouse
+            self._grab_anchor = event.pos
+            return
         if self.animating:
             # Mientras anima solo se acepta saltearla; el estado ya es el final.
             if (
                 event.type == pygame.MOUSEBUTTONDOWN
                 or (event.type == pygame.KEYDOWN
-                    and event.key in (pygame.K_RETURN, pygame.K_SPACE))
+                    and event.key in (
+                        pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE
+                    ))
             ):
                 self.animation.skip()
             return
         if self.game_over:
             return
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+        if event.type == pygame.KEYDOWN and event.key in (
+            pygame.K_RETURN, pygame.K_KP_ENTER
+        ):
             self.end_turn()
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_g:
             self.save()
@@ -294,7 +320,7 @@ class GameScreen:
         no), None = el evento no decide nada.
         """
         if event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_s, pygame.K_RETURN):
+            if event.key in (pygame.K_s, pygame.K_RETURN, pygame.K_KP_ENTER):
                 return True
             if event.key in (pygame.K_n, pygame.K_ESCAPE):
                 return False
@@ -484,9 +510,11 @@ class GameScreen:
             )
 
     def _update_camera(self) -> None:
-        """Paneo por bordes: con el mouse pegado al borde del área de mapa la
+        """Paneo por bordes: con el mouse pegado al borde de la ventana la
         vista se desplaza (solo tiene efecto con zoom; sin zoom el clamp de
-        la cámara mantiene el mapa centrado)."""
+        la cámara mantiene el mapa centrado). Se pasa la ventana entera como
+        bounds para que a la derecha active el borde real de la pantalla y
+        no el límite del mapa con el HUD."""
         now = pygame.time.get_ticks()
         dt = min((now - self._last_frame_ticks) / 1000.0, 0.1)
         self._last_frame_ticks = now
@@ -495,9 +523,12 @@ class GameScreen:
             or self.pending_split is not None
             or self.pending_quit
             or self.game_over
+            or self._grab_anchor is not None  # el grab manda mientras dure
         )
         if not blocked:
-            self.renderer.camera.edge_pan(scale.mouse_pos(), dt)
+            self.renderer.camera.edge_pan(
+                scale.mouse_pos(), dt, (0, 0, *theme.WINDOW_SIZE)
+            )
 
     def _draw_confirm_dialog(
         self, surface: pygame.Surface, title: str, detail: str, yes_label: str

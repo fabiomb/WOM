@@ -130,7 +130,7 @@ class MenuScreen:
 
     def _edit_folder_key(self, event: pygame.event.Event) -> None:
         """Edición de la carpeta de música escribiendo sobre el botón."""
-        if event.key == pygame.K_RETURN:
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             if self.music is not None:
                 self.music.set_folder(self._editing_folder)
             self._editing_folder = None

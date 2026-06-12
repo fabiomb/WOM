@@ -421,6 +421,37 @@ def test_zoom_con_la_rueda(screen, game_screen):
     assert renderer.tile_size == base  # vuelve al encuadre completo
 
 
+def test_grab_con_boton_del_medio(screen, game_screen):
+    camera = game_screen.renderer.camera
+    game_screen.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, {"x": 0, "y": 1}))
+    before = camera.origin
+    game_screen.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN, {"pos": (700, 500), "button": 2}
+    ))
+    game_screen.handle_event(pygame.event.Event(
+        pygame.MOUSEMOTION,
+        {"pos": (640, 470), "rel": (-60, -30), "buttons": (0, 1, 0)},
+    ))
+    # El mapa sigue al mouse: el origen se corre lo mismo que el arrastre.
+    assert camera.origin == (before[0] - 60, before[1] - 30)
+    game_screen.handle_event(pygame.event.Event(
+        pygame.MOUSEBUTTONUP, {"pos": (640, 470), "button": 2}
+    ))
+    moved = camera.origin
+    game_screen.handle_event(pygame.event.Event(
+        pygame.MOUSEMOTION,
+        {"pos": (600, 400), "rel": (-40, -70), "buttons": (0, 0, 0)},
+    ))
+    assert camera.origin == moved  # soltado: mover el mouse ya no panea
+
+
+def test_kp_enter_pasa_el_turno(screen, game_screen):
+    game_screen.handle_event(
+        pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_KP_ENTER})
+    )
+    assert game_screen.game.turn == 1
+
+
 def test_doble_click_fija_la_ruta(screen, game_screen):
     game = game_screen.game
     army = game.armies_of(0)[0]

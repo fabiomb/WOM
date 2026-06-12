@@ -70,23 +70,32 @@ class Camera:
         self._origin_y -= dy
         self._clamp()
 
-    def edge_pan(self, mouse: tuple[int, int], dt: float) -> bool:
-        """Paneo automático cuando el mouse toca los bordes del área de mapa.
+    def edge_pan(
+        self,
+        mouse: tuple[int, int],
+        dt: float,
+        bounds: tuple[int, int, int, int] | None = None,
+    ) -> bool:
+        """Paneo automático cuando el mouse toca los bordes.
 
+        `bounds` es el rect (x, y, ancho, alto) cuyos bordes activan el
+        paneo; por defecto el área del mapa. GameScreen pasa la ventana
+        completa: así el borde derecho real de la pantalla (y no el límite
+        con el HUD) es el que dispara, que es lo natural para el usuario.
         `dt` en segundos (tiempo del frame). Devuelve True si movió algo.
         """
-        ax, ay, aw, ah = self.area
+        bx, by, bw, bh = bounds if bounds is not None else self.area
         mx, my = mouse
-        if not (ax <= mx < ax + aw and ay <= my < ay + ah):
+        if not (bx <= mx < bx + bw and by <= my < by + bh):
             return False
         dx = dy = 0
-        if mx < ax + EDGE_MARGIN:
+        if mx < bx + EDGE_MARGIN:
             dx = -1
-        elif mx >= ax + aw - EDGE_MARGIN:
+        elif mx >= bx + bw - EDGE_MARGIN:
             dx = 1
-        if my < ay + EDGE_MARGIN:
+        if my < by + EDGE_MARGIN:
             dy = -1
-        elif my >= ay + ah - EDGE_MARGIN:
+        elif my >= by + bh - EDGE_MARGIN:
             dy = 1
         if dx == 0 and dy == 0:
             return False

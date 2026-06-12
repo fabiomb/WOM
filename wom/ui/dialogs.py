@@ -81,7 +81,7 @@ class TroopPicker:
     def handle_event(self, event: pygame.event.Event) -> str | None:
         """Devuelve "accept", "cancel" o None. Aceptar requiere total > 0."""
         if event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_s, pygame.K_RETURN):
+            if event.key in (pygame.K_s, pygame.K_RETURN, pygame.K_KP_ENTER):
                 return "accept" if self.total > 0 else None
             if event.key in (pygame.K_n, pygame.K_ESCAPE):
                 return "cancel"

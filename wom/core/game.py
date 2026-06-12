@@ -6,7 +6,9 @@ Fases de un turno (orden fijo, determinista dada la seed):
                   ejércitos desde la reserva de sus fuertes (UI o AI).
 2. Movimiento   — avance según velocidad y costo de terreno, en orden de id
                   de ejército. Intentar entrar al tile de un enemigo detiene
-                  a ambos y encola una batalla.
+                  a ambos y encola una batalla. Un aliado en el paso detiene
+                  la marcha pero NO cancela la ruta: el ejército espera y
+                  sigue cuando el tile se libera (turnos siguientes).
 3. Batallas     — se resuelven todas las encoladas (core.battle). El bando
                   que pierde o se retira abandona su tile si sobrevive,
                   salvo que esté en un fuerte: la retirada solo ocurre en
@@ -197,9 +199,13 @@ class Game:
                 occupant = self.army_at(step)
                 if occupant is not None:
                     if occupant.owner != army.owner:
+                        # Enemigo: batalla; las rutas de ambos se cancelan
+                        # (lo que siga lo decide el resultado del combate).
                         self._battle_queue.append((army.id, occupant.id))
                         occupant.path.clear()
-                    army.path.clear()  # tile ocupado (aliado o enemigo): se detiene
+                        army.path.clear()
+                    # Aliado: espera sin perder la ruta; si el otro se corre
+                    # (este turno o el próximo) la marcha continúa sola.
                     break
                 self._record_move(army.id, army.position, step)
                 army.position = step

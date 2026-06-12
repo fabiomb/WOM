@@ -88,6 +88,35 @@ def test_choques_y_retiradas_del_turno_quedan_registrados():
     assert game.last_clashes == [] and game.last_retreats == set()
 
 
+def test_aliado_en_el_camino_espera_sin_perder_la_ruta():
+    game = _make_game()
+    a = game.spawn_army(0, (1, 1), {"soldado": 10})  # velocidad 3
+    blocker = game.spawn_army(0, (3, 1), {"soldado": 10})
+    game.run_turn([MoveOrder(army_id=a.id, path=((2, 1), (3, 1), (4, 1), (5, 1)))])
+    # Frenó ante el aliado pero la ruta sigue viva (antes se cancelaba).
+    assert a.position == (2, 1)
+    assert a.path == [(3, 1), (4, 1), (5, 1)]
+    # El aliado se corre (mueve después de `a` por id: recién libera ahora).
+    game.run_turn([MoveOrder(army_id=blocker.id, path=((3, 2),))])
+    assert a.position == (2, 1) and a.path  # todavía esperando
+    game.run_turn([])  # camino libre: retoma la marcha solo
+    assert a.position == (5, 1)
+    assert a.path == []
+
+
+def test_cruce_de_aliados_pasa_en_orden_de_id():
+    game = _make_game()
+    first = game.spawn_army(0, (3, 1), {"soldado": 10})  # id menor: mueve antes
+    second = game.spawn_army(0, (1, 1), {"soldado": 10})
+    game.run_turn([
+        MoveOrder(army_id=first.id, path=((3, 2),)),
+        MoveOrder(army_id=second.id, path=((2, 1), (3, 1), (4, 1))),
+    ])
+    # `first` se corrió primero y dejó el paso libre en el mismo turno.
+    assert first.position == (3, 2)
+    assert second.position == (4, 1)
+
+
 def test_encuentro_detiene_y_pelea():
     game = _make_game()
     a = game.spawn_army(0, (2, 1), {"soldado": 50})

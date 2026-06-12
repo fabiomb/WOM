@@ -78,6 +78,21 @@ def test_edge_pan_ignora_el_mouse_fuera_del_area():
     assert cam.origin == before
 
 
+def test_edge_pan_con_bounds_de_ventana_activa_en_el_borde_real():
+    # GameScreen pasa la ventana completa: el paneo a la derecha se activa
+    # en el borde de la pantalla (sobre el HUD), no en el límite mapa/HUD.
+    window = (0, 0, 1920, 1080)
+    cam = _camera()
+    cam.zoom(1, (720, 540))
+    before = cam.origin
+    # Sobre el medio del HUD (lejos del borde): no panea.
+    assert not cam.edge_pan((1500, 540), 0.1, window)
+    assert cam.origin == before
+    # Pegado al borde derecho de la ventana: panea a la derecha.
+    assert cam.edge_pan((1920 - 1, 540), 0.1, window)
+    assert cam.origin[0] < before[0]
+
+
 def test_edge_pan_respeta_el_margen():
     cam = _camera()
     cam.zoom(1, (720, 540))
