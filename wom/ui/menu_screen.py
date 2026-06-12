@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pygame
 
+from wom import __version__
 from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
 from wom.persistence.savegame import list_saves, save_info
@@ -249,6 +250,8 @@ class MenuScreen:
             area.centerx = window.centerx
             self._on_scroll = False
 
+        self._draw_version(surface, window)
+
         if self.mode == "main":
             self._draw_main(surface, area)
         elif self.mode == "new":
@@ -261,6 +264,16 @@ class MenuScreen:
             self._draw_video(surface, area)
         else:
             self._draw_load(surface, area)
+
+    def _draw_version(self, surface: pygame.Surface, window: pygame.Rect) -> None:
+        """Número de versión abajo a la derecha, con sombra para que se lea
+        sobre cualquier zona de la portada."""
+        text = f"v{__version__}"
+        shadow = self.small_font.render(text, True, (20, 14, 8))
+        label = self.small_font.render(text, True, (228, 218, 196))
+        pos = label.get_rect(bottomright=(window.right - 10, window.bottom - 8))
+        surface.blit(shadow, pos.move(1, 1))
+        surface.blit(label, pos)
 
     def _draw_main(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         rows = (
