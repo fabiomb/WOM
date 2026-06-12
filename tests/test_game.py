@@ -334,3 +334,72 @@ def test_partida_sigue_sin_condicion():
     game.spawn_army(1, (6, 1), {"soldado": 10})
     result = game.run_turn([])
     assert not result.is_over
+
+
+def test_transferencia_parcial_de_tropas():
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 30, "arquero": 10})
+    b = game.spawn_army(0, (3, 1), {"soldado": 20})
+    a.xp, b.xp = 100, 40
+    a.food, b.food = 80, 40
+    assert game.transfer_troops(a.id, b.id, {"soldado": 10, "arquero": 5})
+    assert a.composition == {"soldado": 20, "arquero": 5}
+    assert b.composition == {"soldado": 30, "arquero": 5}
+    # XP y comida del destino: promedio ponderado (20 propias, 15 movidas)
+    assert b.xp == round((40 * 20 + 100 * 15) / 35)
+    assert b.food == round((40 * 20 + 80 * 15) / 35)
+    # XP y comida del origen no cambian; el origen sigue vivo
+    assert a.xp == 100 and a.food == 80
+    assert game.army_by_id(a.id) is not None
+
+
+def test_transferencia_total_equivale_a_fusion():
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 40})
+    b = game.spawn_army(0, (3, 1), {"soldado": 20})
+    assert game.transfer_troops(a.id, b.id, {"soldado": 40})
+    assert game.army_by_id(a.id) is None  # vacío: se integró sin cruz
+    assert game.crosses == []
+    assert b.composition == {"soldado": 60}
+
+
+def test_transferencia_invalida():
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 60})
+    b = game.spawn_army(0, (3, 1), {"soldado": 60})
+    assert not game.transfer_troops(a.id, b.id, {"soldado": 70})  # no las tiene
+    assert not game.transfer_troops(a.id, b.id, {"soldado": 50})  # destino > max
+    assert not game.transfer_troops(a.id, b.id, {})               # nada que mover
+    assert not game.transfer_troops(a.id, b.id, {"soldado": 0})
+    assert a.composition == {"soldado": 60} and b.composition == {"soldado": 60}
+
+
+def test_dividir_ejercito():
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 30, "arquero": 10})
+    a.xp, a.food = 77, 55
+    new = game.split_army(a.id, {"arquero": 10, "soldado": 5})
+    assert new is not None and new.owner == 0
+    assert abs(new.position[0] - 2) + abs(new.position[1] - 1) == 1  # aledaño
+    assert new.composition == {"arquero": 10, "soldado": 5}
+    assert a.composition == {"soldado": 25, "arquero": 0}
+    assert new.xp == 77 and new.food == 55  # hereda XP y comida
+
+
+def test_dividir_invalido():
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 30})
+    assert game.split_army(a.id, {"soldado": 30}) is None  # no puede irse todo
+    assert game.split_army(a.id, {"soldado": 0}) is None   # nada que mover
+    assert game.split_army(a.id, {"soldado": 40}) is None  # no las tiene
+    assert len(game.armies) == 1
+
+
+def test_dividir_sin_tile_libre():
+    game = _make_game()
+    a = game.spawn_army(0, (1, 0), {"soldado": 30})  # borde superior
+    game.spawn_army(0, (0, 0), {"soldado": 5})
+    game.spawn_army(0, (2, 0), {"soldado": 5})
+    game.spawn_army(0, (1, 1), {"soldado": 5})
+    assert game.split_army(a.id, {"soldado": 10}) is None
+    assert a.composition == {"soldado": 30}  # nada cambió

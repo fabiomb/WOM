@@ -407,6 +407,102 @@ def _click_menu(menu: MenuScreen, button_id: str) -> None:
     )
 
 
+def test_zoom_con_la_rueda(screen, game_screen):
+    renderer = game_screen.renderer
+    base = renderer.tile_size
+    game_screen.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, {"x": 0, "y": 1}))
+    assert renderer.tile_size > base
+    # round-trip de coordenadas con el origen desplazado por el zoom
+    assert renderer.screen_to_tile(renderer.tile_center((5, 5)), game_screen.game) == (5, 5)
+    # un punto del HUD nunca mapea a un tile (aunque el mapa "siga" debajo)
+    assert renderer.screen_to_tile(game_screen.hud.rect.center, game_screen.game) is None
+    game_screen.draw(screen)  # dibuja recortado al área sin romper
+    game_screen.handle_event(pygame.event.Event(pygame.MOUSEWHEEL, {"x": 0, "y": -1}))
+    assert renderer.tile_size == base  # vuelve al encuadre completo
+
+
+def test_doble_click_fija_la_ruta(screen, game_screen):
+    game = game_screen.game
+    army = game.armies_of(0)[0]
+    x, y = army.position
+    target = (x + 2, y) if game.world.is_passable((x + 2, y)) else (x, y + 2)
+    _click(game_screen, game_screen.renderer.tile_center(army.position))
+    _click(game_screen, game_screen.renderer.tile_center(target))
+    assert game_screen.selected_id == army.id
+    _click(game_screen, game_screen.renderer.tile_center(target))  # doble click
+    assert game_screen.selected_id is None  # foco liberado...
+    path = game_screen.pending_paths[army.id]
+    assert path and path[-1] == target  # ...y la ruta quedó fijada
+
+
+def test_dividir_con_modal(screen, game_screen):
+    game = game_screen.game
+    army = game.armies_of(0)[0]
+    army.composition = {"soldado": 8, "arquero": 4}
+
+    def _free(pos):
+        return (
+            game.world.is_passable(pos)
+            and game.army_at(pos) is None
+            and game.world.fort_at(pos) is None
+            and game.world.town_at(pos) is None
+        )
+
+    # a campo abierto y con al menos un tile libre aledaño (destino del nuevo)
+    army.position = next(
+        (x, y)
+        for y in range(game.world.height)
+        for x in range(game.world.width)
+        if _free((x, y)) and any(_free(n) for n in game.world.neighbors((x, y)))
+    )
+    _click(game_screen, game_screen.renderer.tile_center(army.position))
+    game_screen.draw(screen)  # habilita el botón "Dividir ejército"
+    _click(game_screen, game_screen.hud.split_button.center)
+    assert game_screen.pending_split == army.id
+    game_screen.draw(screen)  # dibuja el modal: habilita sus botones
+
+    picker = game_screen.split_picker
+    _click(game_screen, picker._buttons["plus:arquero"].center)
+    _click(game_screen, picker._buttons["plus:arquero"].center)
+    assert picker.amounts["arquero"] == 2
+    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_s}))
+    assert game_screen.pending_split is None
+    created = game.army_by_id(game_screen.selected_id)  # el nuevo queda elegido
+    assert created is not None and created.id != army.id
+    assert created.composition == {"arquero": 2}
+    assert army.composition == {"soldado": 8, "arquero": 2}
+    game_screen.draw(screen)
+
+
+def test_fusion_parcial_por_clases(screen, game_screen):
+    game = game_screen.game
+    a = game.armies_of(0)[0]
+    a.composition = {"soldado": 20}
+    adjacent = next(
+        pos for pos in game.world.neighbors(a.position) if game.army_at(pos) is None
+    )
+    b = game.spawn_army(0, adjacent, {"soldado": 10})
+
+    _click(game_screen, game_screen.renderer.tile_center(a.position))
+    pygame.key.set_mods(pygame.KMOD_SHIFT)
+    try:
+        _click(game_screen, game_screen.renderer.tile_center(b.position))
+    finally:
+        pygame.key.set_mods(0)
+    assert game_screen.pending_merge == (a.id, b.id)
+    picker = game_screen.merge_picker
+    assert picker.amounts == {"soldado": 20}  # arranca en "Todo"
+    game_screen.draw(screen)  # el modal no debe romper el dibujo
+
+    picker.set_all(False)
+    picker.adjust("soldado", 5)
+    game_screen.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_s}))
+    assert game.army_by_id(a.id) is not None  # transferencia parcial: sigue vivo
+    assert a.composition == {"soldado": 15}
+    assert b.composition == {"soldado": 15}
+    assert "transferidas" in game_screen.notice.lower()
+
+
 def test_partida_completa_desde_la_ui(screen, game_screen):
     limit = game_screen.game.config["turnos_limite_default"]
     for _ in range(limit + 1):

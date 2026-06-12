@@ -372,13 +372,25 @@ class Game:
     # --- consultas y helpers usados por UI, AI y persistencia -------------
 
     def merge_armies(self, source_id: int, target_id: int) -> bool:
-        """Fusiona el ejército `source` dentro de `target` (acción del jugador,
-        fuera de las fases del turno).
+        """Fusiona el ejército `source` entero dentro de `target` (acción del
+        jugador, fuera de las fases del turno). Caso total de transfer_troops.
+        """
+        source = self.army_by_id(source_id)
+        if source is None:
+            return False
+        return self.transfer_troops(source_id, target_id, dict(source.composition))
 
-        Requiere mismo dueño, tiles aledaños y que la suma no supere
-        max_army_size. El target absorbe la composición; XP y comida quedan
-        como promedio ponderado por tropas. El source desaparece sin dejar
-        cruz (no murió: se integró). Devuelve False si no se pudo.
+    def transfer_troops(
+        self, source_id: int, target_id: int, composition: dict[str, int]
+    ) -> bool:
+        """Pasa las tropas indicadas de `source` a `target` (acción del
+        jugador, fuera de las fases del turno).
+
+        Requiere mismo dueño, tiles aledaños, que `source` tenga esas tropas
+        y que `target` no supere max_army_size. XP y comida del target quedan
+        como promedio ponderado por tropas. Si el source queda vacío
+        desaparece sin dejar cruz (no murió: se integró). Devuelve False si
+        no se pudo.
         """
         source = self.army_by_id(source_id)
         target = self.army_by_id(target_id)
@@ -388,19 +400,64 @@ class Game:
             return False
         if not _adjacent(source.position, target.position):
             return False
-        total = source.total_troops + target.total_troops
-        if total == 0 or total > self.config["max_army_size"]:
+        moved = {c: n for c, n in composition.items() if n > 0}
+        total_moved = sum(moved.values())
+        if total_moved == 0:
+            return False
+        if any(source.composition.get(c, 0) < n for c, n in moved.items()):
+            return False
+        new_total = target.total_troops + total_moved
+        if new_total > self.config["max_army_size"]:
             return False
         target.xp = round(
-            (target.xp * target.total_troops + source.xp * source.total_troops) / total
+            (target.xp * target.total_troops + source.xp * total_moved) / new_total
         )
         target.food = round(
-            (target.food * target.total_troops + source.food * source.total_troops) / total
+            (target.food * target.total_troops + source.food * total_moved) / new_total
         )
-        for class_id, count in source.composition.items():
+        for class_id, count in moved.items():
+            source.composition[class_id] -= count
             target.composition[class_id] = target.composition.get(class_id, 0) + count
-        self.armies.remove(source)
+        if source.total_troops == 0:
+            self.armies.remove(source)
         return True
+
+    def split_army(self, source_id: int, composition: dict[str, int]) -> Army | None:
+        """Divide un ejército: las tropas indicadas forman uno nuevo en un
+        tile aledaño libre (acción del jugador, fuera de las fases del turno).
+
+        El destino debe ser transitable y no tener ejército ni fuerte/pueblo
+        (entrar a un sitio debe seguir siendo una decisión de movimiento).
+        Ambas partes deben quedar con al menos una tropa. El nuevo ejército
+        hereda XP y comida del original. Devuelve el ejército creado o None
+        si no se pudo.
+        """
+        source = self.army_by_id(source_id)
+        if source is None:
+            return None
+        moved = {c: n for c, n in composition.items() if n > 0}
+        total_moved = sum(moved.values())
+        if total_moved == 0 or total_moved >= source.total_troops:
+            return None
+        if any(source.composition.get(c, 0) < n for c, n in moved.items()):
+            return None
+        dest = next(
+            (
+                pos for pos in self.world.neighbors(source.position)
+                if self.army_at(pos) is None
+                and self.world.fort_at(pos) is None
+                and self.world.town_at(pos) is None
+            ),
+            None,
+        )
+        if dest is None:
+            return None
+        for class_id, count in moved.items():
+            source.composition[class_id] -= count
+        army = self.spawn_army(source.owner, dest, moved)
+        army.xp = source.xp
+        army.food = source.food
+        return army
 
     def spawn_army(self, owner: int, position: Coord, composition: dict[str, int]) -> Army:
         army = Army(

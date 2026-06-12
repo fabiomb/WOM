@@ -4,10 +4,16 @@ Interacción:
 - Click izquierdo en un ejército propio: lo selecciona.
 - Con un ejército seleccionado, click izquierdo en el mapa: traza el camino
   mínimo hasta ese tile (clicks sucesivos agregan waypoints). Otro click en
-  el mismo ejército (o ESC) confirma la ruta y deselecciona.
+  el mismo ejército (o ESC) confirma la ruta y deselecciona; doble click en
+  el destino hace lo mismo en un solo gesto (fija la ruta y libera el foco).
+- Rueda del mouse: zoom in/out anclado al cursor; con zoom, llevar el mouse
+  a los bordes del área de mapa panea la vista (ver wom/ui/camera.py).
 - Shift+click en un ejército propio: lo elige para fusionar; shift+click en
-  otro propio aledaño abre la confirmación y, si se acepta, se fusionan en
-  uno (ver Game.merge_armies).
+  otro propio aledaño abre el modal de transferencia, donde se elige "Todo"
+  o la cantidad por clase que pasa al destino (Game.transfer_troops).
+- Con un ejército seleccionado, botón "Dividir ejército" o tecla D: modal
+  para elegir qué tropas por clase forman un ejército nuevo en un tile
+  aledaño libre (Game.split_army).
 - Sin ejército seleccionado, click en un fuerte propio: lo selecciona y el
   HUD ofrece "Crear ejército" (toma tropas de la reserva del fuerte).
 - Click derecho: borra el camino trazado y deselecciona.
@@ -42,8 +48,11 @@ from wom.ui.animation import (
     spawn_highlight_rings,
 )
 from wom.ui.assets import Assets
+from wom.ui.dialogs import TroopPicker
 from wom.ui.hud import Hud
 from wom.ui.renderer import MapRenderer
+
+DOUBLE_CLICK_MS = 400  # ventana del doble click que fija la ruta
 
 
 def _manhattan(a: Coord, b: Coord) -> int:
@@ -75,11 +84,19 @@ class GameScreen:
         )
         self.spawn_highlight_start = pygame.time.get_ticks()
         # Fusión pendiente de confirmar: (source_id, target_id). Mientras
-        # exista se muestra el diálogo modal y se bloquea el resto del input.
+        # exista se muestra el modal de transferencia (merge_picker) y se
+        # bloquea el resto del input.
         self.pending_merge: tuple[int, int] | None = None
+        self.merge_picker: TroopPicker | None = None
+        # División pendiente: id del ejército a dividir + su modal.
+        self.pending_split: int | None = None
+        self.split_picker: TroopPicker | None = None
         # Salida al menú pendiente de confirmar (ESC en plena partida).
         self.pending_quit = False
         self._dialog_buttons: dict[str, pygame.Rect] = {}
+        # Doble click que fija la ruta: (ticks, tile) del último click de path.
+        self._last_path_click: tuple[int, Coord] | None = None
+        self._last_frame_ticks = 0  # para el dt del paneo por bordes
 
         # Layout sobre la resolución lógica: la app escala el canvas a la
         # ventana real (scale.present), acá no importa el tamaño físico.
@@ -113,11 +130,20 @@ class GameScreen:
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if self.pending_merge is not None:
-            choice = self._confirm_choice(event)
-            if choice is True:
+            choice = self.merge_picker.handle_event(event)
+            if choice == "accept":
                 self._confirm_merge()
-            elif choice is False:
+            elif choice == "cancel":
                 self.pending_merge = None
+                self.merge_picker = None
+            return
+        if self.pending_split is not None:
+            choice = self.split_picker.handle_event(event)
+            if choice == "accept":
+                self._confirm_split()
+            elif choice == "cancel":
+                self.pending_split = None
+                self.split_picker = None
             return
         if self.pending_quit:
             choice = self._confirm_choice(event)
@@ -138,6 +164,12 @@ class GameScreen:
             else:
                 self.pending_quit = True  # en juego: pide confirmación
             return
+        if event.type == pygame.MOUSEWHEEL:
+            # El zoom no toca el estado del juego: vale aún durante la
+            # animación o con la partida terminada.
+            if event.y:
+                self.renderer.zoom(event.y, scale.mouse_pos())
+            return
         if self.animating:
             # Mientras anima solo se acepta saltearla; el estado ya es el final.
             if (
@@ -153,6 +185,8 @@ class GameScreen:
             self.end_turn()
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_g:
             self.save()
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_d:
+            self._open_split()
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if pygame.key.get_mods() & pygame.KMOD_SHIFT:
                 self._shift_click(event.pos)
@@ -162,6 +196,8 @@ class GameScreen:
                 self.save()
             elif self.selected_fort is not None and self.hud.hit_create_army(event.pos):
                 self._toggle_creation(self.selected_fort)
+            elif self.selected_id is not None and self.hud.hit_split(event.pos):
+                self._open_split()
             else:
                 self._left_click(event.pos)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
@@ -184,13 +220,26 @@ class GameScreen:
                 self.selected_id = occupant.id
                 self.selected_fort = None
                 self.spawn_highlights = []  # ya encontró su ejército
+                self._last_path_click = None
             return
         if self.selected_id is not None:
             army = self.game.army_by_id(self.selected_id)
             if army is None:
                 self.selected_id = None
                 return
+            now = pygame.time.get_ticks()
+            if (
+                self._last_path_click is not None
+                and self._last_path_click[1] == tile
+                and now - self._last_path_click[0] <= DOUBLE_CLICK_MS
+            ):
+                # Doble click en el destino: la ruta queda fijada y se libera
+                # el foco (se puede clickear otra tropa sin sumar waypoints).
+                self._last_path_click = None
+                self.selected_id = None
+                return
             self._extend_path(army.id, army.position, tile)
+            self._last_path_click = (now, tile)
             return
         fort = self.game.world.fort_at(tile)
         if fort is not None and fort.owner == self.human_id:
@@ -215,12 +264,28 @@ class GameScreen:
         if _manhattan(selected.position, occupant.position) != 1:
             self._notify("Para fusionar deben estar en tiles aledaños")
             return
-        total = selected.total_troops + occupant.total_troops
         max_size = self.game.config["max_army_size"]
-        if total > max_size:
-            self._notify(f"No se puede fusionar: {total} supera las {max_size} tropas")
+        room = max_size - occupant.total_troops
+        if room <= 0:
+            self._notify(f"El ejército destino ya tiene {max_size} tropas")
             return
+        rows = [
+            (cid, self.game.classes[cid].nombre, count)
+            for cid, count in sorted(selected.composition.items())
+            if count > 0
+        ]
         self.pending_merge = (selected.id, occupant.id)
+        # Arranca con "Todo" (la fusión clásica); el jugador puede bajar
+        # cantidades por clase para transferir solo una parte.
+        self.merge_picker = TroopPicker(
+            "Fusionar ejércitos",
+            f"#{selected.id} ({selected.total_troops} tropas) → "
+            f"#{occupant.id} ({occupant.total_troops} tropas) · máx {max_size}",
+            rows,
+            cap=room,
+            initial=dict(selected.composition),
+            accept_label="Fusionar (S)",
+        )
 
     def _confirm_choice(self, event: pygame.event.Event) -> bool | None:
         """Input común de los diálogos de confirmación (modales).
@@ -244,13 +309,54 @@ class GameScreen:
 
     def _confirm_merge(self) -> None:
         source_id, target_id = self.pending_merge
+        amounts = {c: n for c, n in self.merge_picker.amounts.items() if n > 0}
         self.pending_merge = None
-        if self.game.merge_armies(source_id, target_id):
-            self.pending_paths.pop(source_id, None)
-            self.selected_id = target_id  # el fusionado queda seleccionado
-            self._notify("Ejércitos fusionados")
+        self.merge_picker = None
+        if self.game.transfer_troops(source_id, target_id, amounts):
+            self.selected_id = target_id  # el destino queda seleccionado
+            if self.game.army_by_id(source_id) is None:
+                self.pending_paths.pop(source_id, None)
+                self._notify("Ejércitos fusionados")
+            else:
+                self._notify("Tropas transferidas")
         else:
             self._notify("No se pudo fusionar")
+
+    def _open_split(self) -> None:
+        """Abre el modal para dividir el ejército seleccionado en dos."""
+        army = (
+            self.game.army_by_id(self.selected_id)
+            if self.selected_id is not None else None
+        )
+        if army is None or army.total_troops < 2:
+            return
+        rows = [
+            (cid, self.game.classes[cid].nombre, count)
+            for cid, count in sorted(army.composition.items())
+            if count > 0
+        ]
+        self.pending_split = army.id
+        self.split_picker = TroopPicker(
+            "Dividir el ejército",
+            f"Elegí qué tropas de #{army.id} ({army.total_troops}) forman el nuevo",
+            rows,
+            cap=army.total_troops - 1,  # siempre queda al menos una en el original
+            accept_label="Dividir (S)",
+        )
+
+    def _confirm_split(self) -> None:
+        army_id = self.pending_split
+        amounts = {c: n for c, n in self.split_picker.amounts.items() if n > 0}
+        self.pending_split = None
+        self.split_picker = None
+        created = self.game.split_army(army_id, amounts)
+        if created is None:
+            self._notify("No se pudo dividir: no hay tile libre aledaño")
+        else:
+            self.selected_id = created.id  # el nuevo queda seleccionado
+            self._notify(
+                f"Ejército dividido: #{created.id} con {created.total_troops} tropas"
+            )
 
     def _toggle_creation(self, fort_pos: Coord) -> None:
         """Encola (o desencola) la creación de un ejército en el fuerte."""
@@ -290,6 +396,9 @@ class GameScreen:
     def end_turn(self) -> None:
         self.animation = None  # descarta una animación anterior si la hubiera
         self.pending_merge = None
+        self.merge_picker = None
+        self.pending_split = None
+        self.split_picker = None
         self.spawn_highlights = []  # con el juego en marcha ya no hace falta
         orders: list[Order] = [
             CreateArmyOrder(position=pos) for pos in self.pending_creations
@@ -315,11 +424,14 @@ class GameScreen:
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(theme.BACKGROUND)
+        self._update_camera()  # paneo por bordes, una vez por frame
         animating = self.animating  # una sola lectura del reloj por frame
         elapsed = self._animation_elapsed() if animating else 0.0
         # Hasta que el choque de batalla revela el resultado, las cruces de
         # los muertos del turno no se muestran.
         revealed = not animating or self.animation.result_revealed(elapsed)
+        # Con zoom el mapa excede su área: nada debe pisar el HUD.
+        surface.set_clip(self.renderer.area)
         self.renderer.draw(
             surface, self.game, self.selected_id, self.pending_paths,
             self.selected_fort, self.pending_creations, hide_armies=animating,
@@ -345,6 +457,7 @@ class GameScreen:
                     )
             else:
                 self.spawn_highlights = []  # cumplió su tiempo
+        surface.set_clip(None)
         selected = (
             self.game.army_by_id(self.selected_id) if self.selected_id is not None else None
         )
@@ -361,27 +474,30 @@ class GameScreen:
             self.selected_fort in self.pending_creations, result, notice,
         )
         if self.pending_merge is not None:
-            self._draw_merge_dialog(surface)
+            self.merge_picker.draw(surface)
+        elif self.pending_split is not None:
+            self.split_picker.draw(surface)
         elif self.pending_quit:
             self._draw_confirm_dialog(
                 surface, "¿Salir al menú?",
                 "La partida no guardada se pierde", "Salir (S)",
             )
 
-    def _draw_merge_dialog(self, surface: pygame.Surface) -> None:
-        """Diálogo modal: confirmar la fusión de dos ejércitos."""
-        source = self.game.army_by_id(self.pending_merge[0])
-        target = self.game.army_by_id(self.pending_merge[1])
-        if source is None or target is None:  # alguno desapareció: cancelar
-            self.pending_merge = None
-            return
-        self._draw_confirm_dialog(
-            surface, "¿Fusionar los ejércitos?",
-            f"#{source.id} ({source.total_troops} tropas) + "
-            f"#{target.id} ({target.total_troops} tropas) = "
-            f"{source.total_troops + target.total_troops} tropas",
-            "Fusionar (S)",
+    def _update_camera(self) -> None:
+        """Paneo por bordes: con el mouse pegado al borde del área de mapa la
+        vista se desplaza (solo tiene efecto con zoom; sin zoom el clamp de
+        la cámara mantiene el mapa centrado)."""
+        now = pygame.time.get_ticks()
+        dt = min((now - self._last_frame_ticks) / 1000.0, 0.1)
+        self._last_frame_ticks = now
+        blocked = (
+            self.pending_merge is not None
+            or self.pending_split is not None
+            or self.pending_quit
+            or self.game_over
         )
+        if not blocked:
+            self.renderer.camera.edge_pan(scale.mouse_pos(), dt)
 
     def _draw_confirm_dialog(
         self, surface: pygame.Surface, title: str, detail: str, yes_label: str

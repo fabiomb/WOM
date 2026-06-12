@@ -29,10 +29,13 @@ from wom.ui.music import MusicPlayer
 from wom.ui.video import RESOLUTIONS, apply_video_settings
 
 # Tamaños de mapa que ofrece el menú: nombre → (ancho, alto, forts, towns).
+# Con el zoom de la rueda los mapas grandes son navegables aunque el tile
+# base quede chico (la vista inicial siempre encuadra el mapa entero).
 MAP_SIZES: dict[str, tuple[int, int, int, int]] = {
     "chico": (22, 15, 3, 4),
     "medio": (30, 20, 4, 6),
-    "grande": (40, 26, 6, 8),
+    "grande": (44, 29, 6, 9),
+    "super grande": (60, 40, 9, 14),
 }
 AI_LEVELS = ["facil", "medio", "dificil"]
 VICTORY_MODES = [VictoryMode.TOTAL, VictoryMode.FLAGS, VictoryMode.TIME]

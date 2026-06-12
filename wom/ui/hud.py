@@ -31,6 +31,12 @@ class Hud:
             rect.x + 20, rect.bottom - 160, rect.width - 40, 42
         )
         self._create_button_visible = False
+        # Mismo lugar que "Crear ejército": nunca se ven a la vez (fuerte
+        # seleccionado vs ejército seleccionado).
+        self.split_button = pygame.Rect(
+            rect.x + 20, rect.bottom - 160, rect.width - 40, 42
+        )
+        self._split_button_visible = False
 
     def hit_end_turn(self, point: tuple[int, int]) -> bool:
         return self.button.collidepoint(point)
@@ -40,6 +46,9 @@ class Hud:
 
     def hit_create_army(self, point: tuple[int, int]) -> bool:
         return self._create_button_visible and self.create_button.collidepoint(point)
+
+    def hit_split(self, point: tuple[int, int]) -> bool:
+        return self._split_button_visible and self.split_button.collidepoint(point)
 
     def draw(
         self,
@@ -111,6 +120,14 @@ class Hud:
                 surface, "Click derecho: borrar/deseleccionar", x, y,
                 self.small_font, theme.TEXT_DIM,
             )
+            y = self._text(
+                surface, "Doble click: fijar la ruta y soltar el ejército", x, y,
+                self.small_font, theme.TEXT_DIM,
+            )
+            y = self._text(
+                surface, "Shift+click en otro propio aledaño: fusionar", x, y,
+                self.small_font, theme.TEXT_DIM,
+            )
         elif selected_fort is not None:
             y += 14
             y = self._text(surface, "Fuerte seleccionado", x, y, self.font, theme.SELECTION)
@@ -135,6 +152,7 @@ class Hud:
 
         if result is not None and result.is_over:
             self._create_button_visible = False
+            self._split_button_visible = False
             self._draw_game_over(surface, game, result)
         else:
             self._create_button_visible = (
@@ -149,6 +167,17 @@ class Hud:
                 text = "Cancelar creación" if creation_pending else "Crear ejército"
                 label = self.font.render(text, True, theme.TEXT)
                 surface.blit(label, label.get_rect(center=self.create_button.center))
+            self._split_button_visible = (
+                selected is not None and selected.total_troops >= 2
+            )
+            if self._split_button_visible:
+                over = self.split_button.collidepoint(scale.mouse_pos())
+                pygame.draw.rect(
+                    surface, theme.BUTTON_BG_OVER if over else theme.BUTTON_BG,
+                    self.split_button, border_radius=6,
+                )
+                label = self.font.render("Dividir ejército (D)", True, theme.TEXT)
+                surface.blit(label, label.get_rect(center=self.split_button.center))
             if notice:
                 rendered = self.small_font.render(notice, True, theme.SELECTION)
                 surface.blit(

@@ -9,21 +9,29 @@ from wom.core.game import Game
 from wom.core.worldmap import Coord, Terrain
 from wom.ui import theme
 from wom.ui.assets import Assets
+from wom.ui.camera import Camera
+from wom.ui.pathline import arrow_head, smooth_path, trim_tail
 from wom.ui.tiling import water_tile
 
 
 class MapRenderer:
-    """Convierte coordenadas de tile a pantalla y dibuja el estado del juego."""
+    """Convierte coordenadas de tile a pantalla y dibuja el estado del juego.
+
+    La cámara (zoom con la rueda + paneo por bordes) decide tile_size y
+    origin; los assets y la fuente de contadores se cachean por nivel de
+    zoom (se escalan una sola vez la primera vez que se usa cada nivel).
+    """
 
     def __init__(self, game: Game, assets: Assets, area: pygame.Rect):
-        self.assets = assets
-        self.tile_size = assets.tile_size
+        self.area = area
         world = game.world
-        self.origin = (
-            area.x + (area.width - world.width * self.tile_size) // 2,
-            area.y + (area.height - world.height * self.tile_size) // 2,
+        self.camera = Camera(
+            (area.x, area.y, area.width, area.height),
+            (world.width, world.height),
+            assets.tile_size,
         )
-        self.count_font = pygame.font.SysFont(None, max(14, int(self.tile_size * 0.55)))
+        self._assets_by_size: dict[int, Assets] = {assets.tile_size: assets}
+        self._fonts_by_size: dict[int, pygame.font.Font] = {}
         # El terreno no cambia durante la partida: la variante de costa de
         # cada tile de agua se calcula una sola vez.
         self._water_tiles = {
@@ -32,6 +40,36 @@ class MapRenderer:
             for x in range(world.width)
             if world.tiles[y][x] is Terrain.WATER
         }
+
+    @property
+    def tile_size(self) -> int:
+        return self.camera.tile_size
+
+    @property
+    def origin(self) -> tuple[int, int]:
+        return self.camera.origin
+
+    @property
+    def assets(self) -> Assets:
+        size = self.tile_size
+        if size not in self._assets_by_size:
+            self._assets_by_size[size] = Assets(size)
+        return self._assets_by_size[size]
+
+    @property
+    def count_font(self) -> pygame.font.Font:
+        size = self.tile_size
+        if size not in self._fonts_by_size:
+            self._fonts_by_size[size] = pygame.font.SysFont(
+                None, max(14, int(size * 0.55))
+            )
+        return self._fonts_by_size[size]
+
+    def zoom(self, direction: int, anchor: tuple[int, int]) -> bool:
+        """Zoom con la rueda, anclado a la posición del mouse en el canvas."""
+        if not self.area.collidepoint(anchor):
+            return False
+        return self.camera.zoom(direction, anchor)
 
     # --- coordenadas ------------------------------------------------------
 
@@ -44,10 +82,23 @@ class MapRenderer:
         return self.tile_rect(pos).center
 
     def screen_to_tile(self, point: tuple[int, int], game: Game) -> Coord | None:
+        if not self.area.collidepoint(point):
+            return None  # con zoom, un punto del HUD podría mapear a un tile
         ts = self.tile_size
         x = (point[0] - self.origin[0]) // ts
         y = (point[1] - self.origin[1]) // ts
         return (x, y) if game.world.in_bounds((x, y)) else None
+
+    def visible_tiles(self, game: Game) -> tuple[range, range]:
+        """Rangos de tiles que caen dentro del área visible (con zoom el
+        mapa excede el área y no tiene sentido dibujar el resto)."""
+        ts = self.tile_size
+        ox, oy = self.origin
+        x0 = max(0, (self.area.left - ox) // ts)
+        y0 = max(0, (self.area.top - oy) // ts)
+        x1 = min(game.world.width, (self.area.right - ox) // ts + 1)
+        y1 = min(game.world.height, (self.area.bottom - oy) // ts + 1)
+        return range(x0, x1), range(y0, y1)
 
     # --- dibujo -------------------------------------------------------------
 
@@ -82,13 +133,15 @@ class MapRenderer:
             surface.blit(marker, (rect.x + 3, rect.bottom - marker.get_height()))
 
     def _draw_terrain(self, surface: pygame.Surface, game: Game) -> None:
-        for y in range(game.world.height):
-            for x in range(game.world.width):
+        assets = self.assets  # una sola resolución del nivel de zoom
+        xs, ys = self.visible_tiles(game)
+        for y in ys:
+            for x in xs:
                 variant = self._water_tiles.get((x, y))
                 if variant is not None:
-                    tile = self.assets.water[variant]
+                    tile = assets.water[variant]
                 else:
-                    tile = self.assets.terrain[game.world.tiles[y][x]]
+                    tile = assets.terrain[game.world.tiles[y][x]]
                 surface.blit(tile, self.tile_rect((x, y)))
 
     def _draw_sites(self, surface: pygame.Surface, game: Game) -> None:
@@ -148,9 +201,19 @@ class MapRenderer:
     def _draw_path(
         self, surface: pygame.Surface, start: Coord, path: list[Coord], color
     ) -> None:
+        """Trazo "a mano alzada" sobre el mapa: curva suave (esquinas
+        redondeadas) rematada con una punta de flecha."""
         points = [self.tile_center(start)] + [self.tile_center(p) for p in path]
-        pygame.draw.lines(surface, color, False, points, 2)
-        pygame.draw.circle(surface, color, points[-1], max(3, self.tile_size // 8))
+        curve = smooth_path(points)
+        head = arrow_head(curve, max(6.0, self.tile_size * 0.4))
+        if head:
+            # el trazo termina en la base de la flecha, no debajo de ella
+            curve = trim_tail(curve, max(6.0, self.tile_size * 0.4) * 0.7)
+        width = max(2, self.tile_size // 14)
+        if len(curve) >= 2:
+            pygame.draw.lines(surface, color, False, curve, width)
+        if head:
+            pygame.draw.polygon(surface, color, head)
 
     def _draw_army(
         self, surface: pygame.Surface, game: Game, army: Army, *, selected: bool

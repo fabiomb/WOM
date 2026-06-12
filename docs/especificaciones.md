@@ -207,21 +207,28 @@ Fuera de alcance v1 (explícito en idea.md): zoom de batalla táctica, editor de
 
 ## 10. Desarrollo extra
 
+Estado: **implementado** (post-M6). Cómo quedó cada punto:
+
 ### Mapa
-* Aprovechar el mapa y los tiles para poder hacer un zoom in/out con rueda del mouse para ver el mapa más de cerca, el movimiento del mouse a los bordes de la ventana debería mover la posición del mapa en esa dirección cuando se está con zoom in
-* Las opciones de tamaño actuales desaprovechan un poco las posibilidades de una PC, podríamos tener mapas un poco más grandes o un tamaño "super grande" de más tiles.
+* Zoom in/out con la rueda del mouse, anclado al cursor (el punto del mapa bajo el mouse no se mueve al hacer zoom). Con zoom, llevar el mouse a los bordes del área de mapa panea la vista en esa dirección. La cámara (`wom/ui/camera.py`, pura) usa niveles discretos de zoom; el nivel 0 siempre encuadra el mapa entero centrado, y los assets se reescalan una sola vez por nivel (cache en el renderer). El render recorta a los tiles visibles.
+* Tamaños de mapa ampliados en el menú: `grande` pasó a 44×29 (6 fuertes, 9 pueblos) y se agregó `super grande` de 60×40 (9 fuertes, 14 pueblos). Con el zoom, los mapas grandes son navegables aunque el tile base quede chico.
 
 ### Movimiento
-* Mientras se dibuja el camino para una tropa, l hacer doble click en una posición, debería guardar ese camino y liberar el foco así se puede hacer click en otra tropa o castillo sin seguir agregando puntos al camino
-* El dibujo de la ruta podría ser más sauve sin rectas duras y con una flecha al final, para que parezca dibujado por un general sobre un mapa
+* Doble click en el destino mientras se traza un camino: fija la ruta y libera el foco (equivale al click en el propio ejército), así se puede seleccionar otra tropa o fuerte sin agregar waypoints.
+* Las rutas se dibujan como trazos "a mano alzada": curvas suaves (corte de esquinas de Chaikin, `wom/ui/pathline.py`, puro) rematadas con una punta de flecha en el destino.
 
 ### Organización de tropas
-* Permitir dividir un ejército con modal para elegir qué clases van al nuevo ejército
-* Al fusionar permitir elegir "Todo" o cantidad por cada clase, mostrar un modal donde se pueda elegir por clase cuáles van a qué ejército
+* Dividir: con un ejército seleccionado, botón "Dividir ejército" del HUD o tecla D. Un modal permite elegir cuántas tropas de cada clase forman el ejército nuevo (debe quedar al menos una en cada parte); el nuevo aparece en un tile aledaño libre (sin ejército ni fuerte/pueblo) y hereda XP y comida (`Game.split_army`).
+* Fusionar: el shift+click sobre dos ejércitos propios aledaños ahora abre un modal de transferencia que arranca en "Todo" (la fusión clásica) y permite ajustar la cantidad por clase con botones −/+ (con Shift van de a 10), respetando `max_army_size` del destino. Si se transfiere todo, el origen desaparece sin cruz; si es parcial, ambos siguen en el mapa (`Game.transfer_troops`). El modal es el mismo componente que el de dividir (`wom/ui/dialogs.py`).
 
 
 
 ## 11. Fase 2
+
+### Escenarios predefinidos
+
+Sección con mapas predefinidos para poder jugar escenarios, tropas y mapa ya dibujado y organizado representando batallas de fantasía o históricas.
+
 
 ### Multijugador
 
