@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 WOM is a turn-based 2D military strategy game (human vs AI in v1). The game design lives in `idea.md` and the full technical specification in `docs/especificaciones.md` — both in Spanish. The user communicates in Spanish; respond, document, and write docstrings in Spanish. Code identifiers are in English.
 
-**Stack (decided)**: Python 3.13 + pygame-ce, JSON for config and savegames, pytest, PyInstaller for distribution (Windows + Linux; the Linux build must be done on Linux — WSL2 or CI).
+**Stack (decided)**: Python 3.13 + pygame-ce, JSON for config and savegames, pytest, PyInstaller for distribution (Windows + Linux + macOS; PyInstaller can't cross-compile, so each build runs on its own OS — WSL2 or CI).
 
 ## Commands
 
@@ -48,7 +48,7 @@ Key invariants:
 
 All v1 milestones (M1–M6, defined in `docs/especificaciones.md` §8) are **done** and tested: core + headless (M1), playable pygame UI (M2), three validated AI levels (M3), menu + savegames (M4), gameplay/presentation polish — cover art menu, army merging, music, sound/video options (M5), and distributable builds (M6). `main.py` opens the menu (`wom/ui/menu_screen.py`); in-game saving via HUD button or G key, ESC asks for confirmation and returns to the menu. v1 explicitly excludes: tactical battle zoom, map editor, multiplayer.
 
-Builds: `pyinstaller wom.spec` produces `dist/wom/` (onedir, windowed exe). All resource paths go through `wom/paths.py`: read-only `data/` resolves into the bundle (`sys._MEIPASS`) when frozen, writable `saves/` + `settings.json` sit next to the executable. `.github/workflows/build.yml` tests and builds Windows + Linux artifacts on `v*` tags or manually (PyInstaller can't cross-compile; the Linux build runs on ubuntu-latest).
+Builds: `pyinstaller wom.spec` produces `dist/wom/` (onedir, windowed exe). All resource paths go through `wom/paths.py`: read-only `data/` resolves into the bundle (`sys._MEIPASS`) when frozen, writable `saves/` + `settings.json` sit next to the executable. `.github/workflows/build.yml` tests and builds Windows + Linux + macOS artifacts on `v*` tags or manually (PyInstaller can't cross-compile; each platform builds on its own runner — the macOS one is `macos-latest`, arm64/Apple Silicon only).
 
 Battle semantics: combat triggers when an army tries to *enter* an enemy's tile — armies never share a tile; each side fights from its own tile (own terrain bonus, defender gets fort/town bonus). Attacker classes with `ignora_bonus_fort` in `classes.json` (the arquero) cancel the defender's fort bonus for their own contribution — they fight the fort's garrison 1:1. Losers/retreaters fall back one tile, except an army standing on a fort: it never retreats (retreat only happens in open field), so a fort holder must be destroyed to dislodge it.
 

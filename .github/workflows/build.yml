@@ -31,6 +31,8 @@ jobs:
             artifact: wom-windows
           - os: ubuntu-latest
             artifact: wom-linux
+          - os: macos-latest
+            artifact: wom-macos
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -41,17 +43,20 @@ jobs:
       - run: pyinstaller wom.spec --noconfirm
       # sanity check: una partida AI vs AI completa con el ejecutable congelado
       - run: ./dist/wom/wom --headless --seed 42
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: dist/wom
 
       # --- al taguear v*: empaquetar y publicar el release ----------------
-      # En Linux se usa tar.gz para conservar el bit de ejecución del binario.
+      # En Linux y macOS se usa tar.gz para conservar el bit de ejecución.
       - name: Empaquetar (Linux)
         if: runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/')
         run: tar -czf "wom-${{ github.ref_name }}-linux.tar.gz" -C dist wom
+      - name: Empaquetar (macOS)
+        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/')
+        run: tar -czf "wom-${{ github.ref_name }}-macos-arm64.tar.gz" -C dist wom
       - name: Empaquetar (Windows)
         if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/')
         run: Compress-Archive -Path dist/wom -DestinationPath "wom-${{ github.ref_name }}-windows.zip"

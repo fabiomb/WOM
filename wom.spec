@@ -5,8 +5,9 @@
 
 Genera dist/wom/ con el ejecutable y data/ (config, assets, música) dentro
 del bundle. saves/ y settings.json se crean junto al ejecutable al jugar
-(app portable, ver wom/paths.py). Vale para Windows y Linux (cada build se
-hace en su propio sistema operativo: PyInstaller no cruza plataformas).
+(app portable, ver wom/paths.py). Vale para Windows, Linux y macOS (cada
+build se hace en su propio sistema operativo: PyInstaller no cruza
+plataformas).
 """
 
 a = Analysis(
