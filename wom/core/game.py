@@ -207,6 +207,12 @@ class Game:
                     # Aliado: espera sin perder la ruta; si el otro se corre
                     # (este turno o el próximo) la marcha continúa sola.
                     break
+                if self._is_pinned(army):
+                    # Trabado por enemigos en lados opuestos: no puede escapar
+                    # a un tile libre. Solo le queda atacar a quienes lo
+                    # rodean (rama de arriba) o pasar el turno.
+                    army.path.clear()
+                    break
                 self._record_move(army.id, army.position, step)
                 army.position = step
                 army.path.pop(0)
@@ -304,6 +310,23 @@ class Game:
         """True si un ejército enemigo está pisando el tile (bloquea producción)."""
         occupant = self.army_at(pos)
         return occupant is not None and occupant.owner != player_id
+
+    def _is_pinned(self, army: Army) -> bool:
+        """¿Está el ejército 'trabado' por enemigos en lados opuestos?
+
+        Tener enemigos a ambos lados de un eje (Norte y Sur, o Este y Oeste)
+        —caso particular de estar rodeado— le impide escapar a un tile libre:
+        solo puede atacar a quienes lo rodean o pasar el turno. Enemigos en
+        dos lados contiguos (p. ej. Norte y Este) NO lo traban.
+        """
+        x, y = army.position
+        horiz = self._enemy_on((x - 1, y), army.owner) and self._enemy_on(
+            (x + 1, y), army.owner
+        )
+        vert = self._enemy_on((x, y - 1), army.owner) and self._enemy_on(
+            (x, y + 1), army.owner
+        )
+        return horiz or vert
 
     def _add_to_reserve(self, fort: Fort, total: int) -> None:
         """Acumula tropas nuevas en la reserva, en partes iguales por clase."""

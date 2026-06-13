@@ -73,6 +73,47 @@ def test_no_hay_retirada_dentro_de_un_fuerte():
     assert fort.owner == 1  # el atacante no pudo entrar a capturar
 
 
+def test_trabado_por_lados_opuestos_no_escapa():
+    game = _make_game()
+    army = game.spawn_army(0, (3, 2), {"soldado": 10})
+    game.spawn_army(1, (3, 1), {"soldado": 10})  # Norte
+    game.spawn_army(1, (3, 3), {"soldado": 10})  # Sur (eje vertical cerrado)
+    game.run_turn([MoveOrder(army_id=army.id, path=((2, 2), (1, 2)))])
+    assert army.position == (3, 2)  # no pudo escapar lateralmente
+    assert army.path == []  # la ruta de fuga se descartó
+
+
+def test_trabado_en_dos_lados_contiguos_si_escapa():
+    game = _make_game()
+    army = game.spawn_army(0, (3, 2), {"soldado": 10})
+    game.spawn_army(1, (3, 1), {"soldado": 10})  # Norte
+    game.spawn_army(1, (2, 2), {"soldado": 10})  # Oeste (lados contiguos)
+    game.run_turn([MoveOrder(army_id=army.id, path=((4, 2),))])
+    assert army.position == (4, 2)  # lados contiguos no traban: escapa
+
+
+def test_trabado_puede_atacar_a_quien_lo_rodea():
+    game = _make_game()
+    game.config["batalla"]["sigma_aleatoriedad"] = 0.0
+    army = game.spawn_army(0, (3, 2), {"soldado": 100})
+    enemy_n = game.spawn_army(1, (3, 1), {"soldado": 5})  # Norte (lo atacará)
+    game.spawn_army(1, (3, 3), {"soldado": 10})  # Sur (cierra el eje)
+    game.run_turn([MoveOrder(army_id=army.id, path=((3, 1),))])
+    # aunque trabado, puede embestir a un enemigo contiguo: hubo batalla
+    assert enemy_n not in game.armies or enemy_n.position != (3, 1)
+
+
+def test_no_se_escurre_entre_dos_enemigos():
+    game = _make_game()
+    army = game.spawn_army(0, (1, 2), {"soldado": 10})  # velocidad 3
+    game.spawn_army(1, (3, 1), {"soldado": 10})  # Norte de (3,2)
+    game.spawn_army(1, (3, 3), {"soldado": 10})  # Sur de (3,2)
+    # intenta pasar en línea recta por (3,2), que está trabado
+    game.run_turn([MoveOrder(army_id=army.id, path=((2, 2), (3, 2), (4, 2)))])
+    assert army.position == (3, 2)  # queda atrapado entre ambos, no se cuela
+    assert army.path == []  # no puede continuar la fuga
+
+
 def test_choques_y_retiradas_del_turno_quedan_registrados():
     game = _make_game()
     game.config["batalla"]["sigma_aleatoriedad"] = 0.0  # resultado determinista
