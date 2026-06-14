@@ -45,7 +45,7 @@ from wom.core.battle import (
 )
 from wom.core.config import UnitClass, load_game_config, load_unit_classes
 from wom.core.mapgen import MapParams, generate_map
-from wom.core.orders import CreateArmyOrder, Order
+from wom.core.orders import CreateArmyOrder, MergeArmyOrder, Order, SplitArmyOrder
 from wom.core.victory import VictoryMode, VictoryResult, check_victory
 from wom.core.worldmap import Coord, Fort, WorldMap
 
@@ -161,13 +161,23 @@ class Game:
                 self.spawn_army(fort.owner, fort.position, dict(initial))
 
     def _apply_orders(self, orders: list[Order]) -> None:
+        # Las reorganizaciones (crear/fusionar/dividir) se aplican antes que
+        # los paths: cambian qué ejércitos existen, y las MoveOrder restantes
+        # deben referirse al estado ya reorganizado.
+        moves = []
         for order in orders:
             if isinstance(order, CreateArmyOrder):
                 self._create_army_from_fort(order.position)
+            elif isinstance(order, MergeArmyOrder):
+                self.merge_armies(order.source_id, order.target_id)
+            elif isinstance(order, SplitArmyOrder):
+                self.split_army(order.source_id, dict(order.composition))
             else:
-                army = self.army_by_id(order.army_id)
-                if army is not None and not army.is_destroyed:
-                    army.path = list(order.path)
+                moves.append(order)
+        for order in moves:
+            army = self.army_by_id(order.army_id)
+            if army is not None and not army.is_destroyed:
+                army.path = list(order.path)
 
     def _create_army_from_fort(self, position: Coord) -> None:
         """Ejecuta una CreateArmyOrder si sigue siendo válida."""

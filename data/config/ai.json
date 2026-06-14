@@ -1,38 +1,85 @@
 {
-  "facil": {
-    "horizonte": 1,
-    "agresividad": 0.8,
-    "peso_economia": 0.0,
-    "peso_defensa": 0.2,
-    "umbral_ataque": 0.8,
-    "umbral_crear_ejercito": 40,
-    "agrupa": false,
-    "coordina": false,
-    "evita_peligro": false,
-    "descripcion": "Ataca casi siempre, ignora la economía y la defensa."
+  "niveles": {
+    "facil": {
+      "horizonte": 1,
+      "agresividad": 0.8,
+      "peso_economia": 0.0,
+      "peso_defensa": 0.2,
+      "peso_guarnicion": 0.1,
+      "umbral_ataque": 0.8,
+      "umbral_crear_ejercito": 40,
+      "umbral_fusion": 0.4,
+      "umbral_division": 80,
+      "agrupa": false,
+      "coordina": false,
+      "evita_peligro": false,
+      "fusiona": false,
+      "divide": false,
+      "descripcion": "Ataca casi siempre, ignora la economía y la defensa."
+    },
+    "medio": {
+      "horizonte": 3,
+      "agresividad": 0.5,
+      "peso_economia": 0.4,
+      "peso_defensa": 0.5,
+      "peso_guarnicion": 0.5,
+      "umbral_ataque": 1.1,
+      "umbral_crear_ejercito": 30,
+      "umbral_fusion": 0.4,
+      "umbral_division": 80,
+      "agrupa": false,
+      "coordina": false,
+      "evita_peligro": false,
+      "fusiona": true,
+      "divide": false,
+      "descripcion": "Calcula distancias, defiende fuertes, ataca con ventaja numérica."
+    },
+    "dificil": {
+      "horizonte": 3,
+      "agresividad": 0.6,
+      "peso_economia": 0.5,
+      "peso_defensa": 0.5,
+      "peso_guarnicion": 0.6,
+      "umbral_ataque": 1.1,
+      "umbral_crear_ejercito": 20,
+      "umbral_fusion": 0.4,
+      "umbral_division": 70,
+      "agrupa": true,
+      "coordina": true,
+      "evita_peligro": true,
+      "fusiona": true,
+      "divide": true,
+      "descripcion": "Gestiona economía, agrupa ejércitos, guarnece fuertes y reacciona al jugador."
+    }
   },
-  "medio": {
-    "horizonte": 3,
-    "agresividad": 0.5,
-    "peso_economia": 0.4,
-    "peso_defensa": 0.5,
-    "umbral_ataque": 1.1,
-    "umbral_crear_ejercito": 30,
-    "agrupa": false,
-    "coordina": false,
-    "evita_peligro": false,
-    "descripcion": "Calcula distancias, defiende fuertes, ataca con ventaja numérica."
-  },
-  "dificil": {
-    "horizonte": 3,
-    "agresividad": 0.6,
-    "peso_economia": 0.5,
-    "peso_defensa": 0.5,
-    "umbral_ataque": 1.1,
-    "umbral_crear_ejercito": 20,
-    "agrupa": true,
-    "coordina": true,
-    "evita_peligro": true,
-    "descripcion": "Gestiona economía, agrupa ejércitos y reacciona al jugador."
+  "personalidades": {
+    "agresivo": {
+      "mult_agresividad": 1.4,
+      "mult_peso_economia": 0.6,
+      "mult_peso_defensa": 0.6,
+      "mult_peso_guarnicion": 0.5,
+      "mult_umbral_ataque": 0.8,
+      "fusiona": true,
+      "divide": false,
+      "descripcion": "Busca la batalla: ataca con poco margen, fusiona para golpear fuerte y descuida la defensa."
+    },
+    "estratega": {
+      "mult_agresividad": 0.85,
+      "mult_peso_economia": 1.4,
+      "mult_peso_defensa": 1.3,
+      "mult_peso_guarnicion": 1.4,
+      "mult_umbral_ataque": 1.15,
+      "fusiona": true,
+      "divide": true,
+      "descripcion": "Economía y defensa primero: guarnece sus fuertes, divide para cubrir terreno y solo ataca con ventaja clara."
+    },
+    "moderado": {
+      "mult_agresividad": 1.0,
+      "mult_peso_economia": 1.0,
+      "mult_peso_defensa": 1.0,
+      "mult_peso_guarnicion": 1.0,
+      "mult_umbral_ataque": 1.0,
+      "descripcion": "Equilibrado: usa los pesos base del nivel sin inclinarse a ningún extremo."
+    }
   }
 }

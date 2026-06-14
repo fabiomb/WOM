@@ -6,7 +6,8 @@ de balanceo. Determinista: misma seed => misma partida.
 
 from __future__ import annotations
 
-from wom.ai.ai_player import AIPlayer
+from wom.ai.ai_player import AIPlayer, choose_personality
+from wom.core.config import load_ai_personalities
 from wom.core.game import Game, Player
 from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode, VictoryResult
@@ -34,7 +35,16 @@ def run_headless(
         Player(1, f"AI Azul ({levels[1]})", is_ai=True, ai_level=levels[1]),
     ]
     game = Game.new(params, players, victory_mode)
-    ais = [AIPlayer(p.id, levels[p.id], debug=debug_ai) for p in players]
+    personalities = list(load_ai_personalities())
+    ais = [
+        AIPlayer(
+            p.id,
+            levels[p.id],
+            debug=debug_ai,
+            personality=choose_personality(game.seed, p.id, personalities),
+        )
+        for p in players
+    ]
 
     def say(msg: str) -> None:
         if not quiet:

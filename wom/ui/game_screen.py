@@ -36,7 +36,8 @@ from __future__ import annotations
 
 import pygame
 
-from wom.ai.ai_player import AIPlayer
+from wom.ai.ai_player import AIPlayer, choose_personality
+from wom.core.config import load_ai_personalities
 from wom.core.game import Game
 from wom.core.orders import CreateArmyOrder, MoveOrder, Order
 from wom.core.pathfind import shortest_path
@@ -66,8 +67,17 @@ class GameScreen:
         self.game = game
         self.human_id = human_id
         # El nivel viaja en Player.ai_level (savegames); el parámetro es fallback.
+        # La personalidad se deriva de la seed: misma partida => misma
+        # personalidad, también al recargar un savegame.
+        personalities = list(load_ai_personalities())
         self.ais = [
-            AIPlayer(p.id, p.ai_level or ai_level) for p in game.players if p.is_ai
+            AIPlayer(
+                p.id,
+                p.ai_level or ai_level,
+                personality=choose_personality(game.seed, p.id, personalities),
+            )
+            for p in game.players
+            if p.is_ai
         ]
         self.selected_id: int | None = None
         self.selected_fort: Coord | None = None

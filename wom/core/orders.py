@@ -31,4 +31,31 @@ class CreateArmyOrder:
     position: Coord  # tile del fuerte
 
 
-Order = MoveOrder | CreateArmyOrder
+@dataclass(frozen=True)
+class MergeArmyOrder:
+    """Fusiona `source` entero dentro de `target` (deben ser aledaños y del
+    mismo dueño). Es la versión "orden" de `Game.merge_armies`: la usa la AI
+    para consolidar ejércitos dispersos (el humano fusiona con Shift+click,
+    de forma inmediata).
+    """
+
+    source_id: int
+    target_id: int
+
+
+@dataclass(frozen=True)
+class SplitArmyOrder:
+    """Divide `source`: las tropas de `composition` forman un ejército nuevo
+    en un tile aledaño libre (versión "orden" de `Game.split_army`). La usa
+    la AI para dejar una guarnición en un fuerte y proyectar el resto (el
+    humano divide con el botón/tecla D, de forma inmediata).
+
+    `composition` es una tupla de pares (clase, cantidad) para que la orden
+    sea inmutable y hasheable como las demás.
+    """
+
+    source_id: int
+    composition: tuple[tuple[str, int], ...]
+
+
+Order = MoveOrder | CreateArmyOrder | MergeArmyOrder | SplitArmyOrder

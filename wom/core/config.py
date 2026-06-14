@@ -51,6 +51,21 @@ def load_game_config(path: Path | None = None) -> dict:
     return json.loads((path or CONFIG_DIR / "game.json").read_text(encoding="utf-8"))
 
 
-def load_ai_config(path: Path | None = None) -> dict:
-    """Carga los parámetros de los niveles de AI desde ai.json."""
+def _load_ai_raw(path: Path | None = None) -> dict:
     return json.loads((path or CONFIG_DIR / "ai.json").read_text(encoding="utf-8"))
+
+
+def load_ai_config(path: Path | None = None) -> dict:
+    """Carga los parámetros de los niveles de AI desde ai.json.
+
+    Acepta el formato nuevo (``{"niveles": {...}, "personalidades": {...}}``)
+    y el antiguo (los niveles en la raíz), devolviendo siempre el diccionario
+    de niveles.
+    """
+    raw = _load_ai_raw(path)
+    return raw.get("niveles", raw)
+
+
+def load_ai_personalities(path: Path | None = None) -> dict:
+    """Carga las personalidades de AI desde ai.json (vacío si no hay)."""
+    return _load_ai_raw(path).get("personalidades", {})
