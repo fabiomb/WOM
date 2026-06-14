@@ -173,24 +173,32 @@ def _paint_water(world: WorldMap, target: int, rng: random.Random) -> None:
 def _paint_river(
     world: WorldMap, rng: random.Random, crossings: list[tuple[Coord, bool]]
 ) -> int:
-    """Río serpenteante de borde a borde. Cada pocos tiles registra un cruce
+    """Río serpenteante de borde a borde. Cada cierto tramo registra un cruce
     en `crossings` (ahí irá un puente) para que el río no corte el mapa en
-    dos."""
+    dos, pero con pocos puentes: los justos para mantener la conectividad sin
+    anular la barrera de agua (un río acribillado de puentes deja de serlo)."""
     vertical = rng.random() < 0.5
     if vertical:
         x, y = rng.randrange(world.width // 4, 3 * world.width // 4), 0
         main = (0, 1)
+        span = world.height
     else:
         x, y = 0, rng.randrange(world.height // 4, 3 * world.height // 4)
         main = (1, 0)
+        span = world.width
     painted = 0
-    next_ford = rng.randint(3, 6)
+    # Espaciado de los puentes proporcional al largo del río: ~2 cruces por
+    # río (a veces 1 o 3), no uno cada pocos tiles. El primer cruce siempre
+    # cae (span_lo < largo del río), así el río nunca parte el mapa en dos.
+    span_lo = max(8, int(span * 0.20))
+    span_hi = max(span_lo + 4, int(span * 0.55))
+    next_ford = rng.randint(span_lo, span_hi)
     for _ in range(3 * (world.height if vertical else world.width)):
         if not world.in_bounds((x, y)):
             break
         next_ford -= 1
         if next_ford <= 0:
-            next_ford = rng.randint(3, 6)
+            next_ford = rng.randint(span_lo, span_hi)
             crossings.append(((x, y), vertical))
         elif world.tiles[y][x] is not Terrain.WATER:
             world.tiles[y][x] = Terrain.WATER  # el río atraviesa cualquier terreno
