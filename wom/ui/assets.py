@@ -47,3 +47,18 @@ def _load(name: str, size: int) -> pygame.Surface:
     surface = pygame.Surface((size, size))
     surface.fill(FALLBACK_COLOR)
     return surface
+
+
+def load_image(name: str) -> pygame.Surface | None:
+    """Carga un PNG de data/assets/ a su tamaño original, o None si falta.
+
+    Útil para imágenes que no son sprites de tile (p. ej. la ilustración de
+    victoria/derrota de la pantalla de fin de partida).
+    """
+    path = ASSETS_DIR / f"{name}.png"
+    if not path.exists():
+        return None
+    image = pygame.image.load(str(path))
+    if pygame.display.get_surface() is not None:
+        image = image.convert_alpha()
+    return image

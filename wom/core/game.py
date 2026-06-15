@@ -91,6 +91,9 @@ class Game:
     rng: random.Random
     seed: int
     turn: int = 0
+    # Batallas libradas en toda la partida (acumulado, todas las facciones).
+    # Se serializa para mostrarlo en la pantalla de fin de partida.
+    battles_fought: int = 0
     # Cruces de ejércitos muertos: (x, y, turno de la muerte). La UI las
     # desvanece con la edad y el core las purga tras `turnos_cruz` turnos.
     crosses: list[tuple[int, int, int]] = field(default_factory=list)
@@ -240,6 +243,7 @@ class Game:
             )
             self.last_battles.append((defender.position, result.outcome.name))
             self.last_clashes.append((attacker.id, defender.id))
+            self.battles_fought += 1
             self.players[attacker.owner].troops_lost += attacker.apply_losses(
                 result.attacker_losses
             )
@@ -520,6 +524,7 @@ class Game:
         return {
             "seed": self.seed,
             "turn": self.turn,
+            "battles_fought": self.battles_fought,
             "victory_mode": self.victory_mode.value,
             "world": self.world.to_dict(),
             "players": [p.to_dict() for p in self.players],
@@ -544,6 +549,8 @@ class Game:
             rng=rng,
             seed=data["seed"],
             turn=data["turn"],
+            # Compat con saves previos sin contador de batallas.
+            battles_fought=data.get("battles_fought", 0),
             # Compat con saves previos a las cruces con edad ([x, y]): se les
             # asigna el turno actual y empiezan a desvanecerse desde ahora.
             crosses=[

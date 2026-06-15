@@ -6,9 +6,10 @@ import pygame
 
 from wom.core.army import Army
 from wom.core.game import Game
-from wom.core.victory import VictoryResult
+from wom.core.victory import VictoryResult, VictoryMode
 from wom.core.worldmap import Fort
 from wom.ui import scale, theme
+from wom.ui import assets
 
 
 MAX_ARMY_ROWS = 8  # filas de la lista de ejércitos propios
@@ -19,8 +20,12 @@ class Hud:
         self.rect = rect
         self.human_id = human_id
         self.title_font = pygame.font.SysFont(None, 34)
+        self.result_font = pygame.font.SysFont(None, 64)
         self.font = pygame.font.SysFont(None, 22)
         self.small_font = pygame.font.SysFont(None, 18)
+        # Ilustraciones de fin de partida (victoria/derrota), cargadas a
+        # demanda; None si el asset falta.
+        self._result_images: dict[str, pygame.Surface | None] = {}
         self.button = pygame.Rect(
             rect.x + 20, rect.bottom - 60, rect.width - 40, 42
         )
@@ -230,18 +235,102 @@ class Hud:
         overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
         overlay.fill(theme.GAMEOVER_BG)
         surface.blit(overlay, (0, 0))
-        if result.winner is not None:
-            text = f"Ganó {game.players[result.winner].name}"
-            color = theme.player_color(result.winner)
+
+        if result.winner is None:
+            title_text, color, image_name = "Empate", theme.TEXT, None
+        elif result.winner == self.human_id:
+            title_text, color, image_name = "¡Victoria!", (235, 205, 90), "victory"
         else:
-            text, color = "Empate", theme.TEXT
-        center = surface.get_rect().center
-        title = self.title_font.render(text, True, color)
-        reason = self.font.render(result.reason, True, theme.TEXT)
+            title_text, color, image_name = "Derrota", (210, 80, 80), "defeat"
+
+        image = self._result_image(image_name) if image_name else None
+
+        cx = surface.get_rect().centerx
+        # Líneas de estadística que se muestran bajo la imagen.
+        human = game.players[self.human_id]
+        stats: list[str] = [
+            self._result_reason(result),
+            "",
+            f"Turnos jugados: {game.turn}",
+            f"Batallas libradas: {game.battles_fought}",
+            f"Tus bajas: {human.troops_lost}",
+        ]
+        for player in game.players:
+            if player.id != self.human_id:
+                stats.append(f"Bajas de {player.name}: {player.troops_lost}")
+        total_losses = sum(p.troops_lost for p in game.players)
+        stats.append(f"Bajas totales: {total_losses}")
+
+        # Alto total del bloque para centrarlo verticalmente.
+        title = self.result_font.render(title_text, True, color)
+        line_h = self.font.get_height() + 6
+        block_h = title.get_height() + 18
+        if image is not None:
+            block_h += image.get_height() + 18
+        block_h += len(stats) * line_h + 12 + self.small_font.get_height()
+
+        y = surface.get_rect().centery - block_h // 2
+        surface.blit(title, title.get_rect(midtop=(cx, y)))
+        y += title.get_height() + 18
+
+        if image is not None:
+            surface.blit(image, image.get_rect(midtop=(cx, y)))
+            y += image.get_height() + 18
+
+        for line in stats:
+            if not line:
+                y += line_h // 2
+                continue
+            rendered = self.font.render(line, True, theme.TEXT)
+            surface.blit(rendered, rendered.get_rect(midtop=(cx, y)))
+            y += line_h
+
+        y += 12
         hint = self.small_font.render("ESC para volver al menú", True, theme.TEXT_DIM)
-        surface.blit(title, title.get_rect(center=(center[0], center[1] - 30)))
-        surface.blit(reason, reason.get_rect(center=center))
-        surface.blit(hint, hint.get_rect(center=(center[0], center[1] + 30)))
+        surface.blit(hint, hint.get_rect(midtop=(cx, y)))
+
+    def _result_reason(self, result: VictoryResult) -> str:
+        """Motivo del fin de partida redactado desde la perspectiva del
+        jugador humano. `result.reason` viene siempre en clave del ganador,
+        así que en derrota se reformula para referirse al propio jugador."""
+        if result.winner is None:
+            return "Aniquilación mutua"
+        won = result.winner == self.human_id
+        if result.mode is VictoryMode.TOTAL:
+            return (
+                "El rival se quedó sin ejércitos ni fuertes"
+                if won else "Te has quedado sin ejércitos ni fuertes"
+            )
+        if result.mode is VictoryMode.FLAGS:
+            return (
+                "Controlas todas las banderas"
+                if won else "El rival controla todas las banderas"
+            )
+        if result.mode is VictoryMode.TIME:
+            return (
+                "Lograste superioridad de territorio y tropas al turno límite"
+                if won else "El rival logró superioridad de territorio y tropas al turno límite"
+            )
+        return result.reason
+
+    def _result_image(self, name: str) -> pygame.Surface | None:
+        """Carga (y cachea) la ilustración de victoria/derrota, escalada para
+        caber en la pantalla. Devuelve None si el asset no existe."""
+        if name not in self._result_images:
+            self._result_images[name] = assets.load_image(name)
+        image = self._result_images[name]
+        if image is None:
+            return None
+        max_w = min(420, self.rect.left - 40 if self.rect.left > 80 else 420)
+        max_h = 320
+        w, h = image.get_size()
+        factor = min(max_w / w, max_h / h, 1.0)
+        if factor < 1.0:
+            image = pygame.transform.smoothscale(
+                image, (max(1, int(w * factor)), max(1, int(h * factor)))
+            )
+            self._result_images[name] = image
+        return image
 
     def _text(self, surface, text, x, y, font, color=theme.TEXT) -> int:
         rendered = font.render(text, True, color)
