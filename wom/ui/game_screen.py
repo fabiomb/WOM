@@ -180,6 +180,12 @@ class GameScreen:
     def net_disconnected(self) -> bool:
         return self.net is not None and self.net.disconnected
 
+    @property
+    def capturing_text(self) -> bool:
+        """True mientras se escribe en el chat: el loop suspende los atajos
+        globales (p. ej. la M del reproductor) para que las teclas vayan acá."""
+        return self.chat_active
+
     def _animation_elapsed(self) -> float:
         return (pygame.time.get_ticks() - self.animation_start) / 1000.0
 

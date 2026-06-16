@@ -117,6 +117,11 @@ class MultiplayerScreen:
         self._host_rules: MatchRules | None = None
 
     @property
+    def capturing_text(self) -> bool:
+        """True mientras un campo de texto tiene foco (suspende atajos globales)."""
+        return self.focused is not None
+
+    @property
     def _field_objs(self) -> dict[str, TextField]:
         return {
             "name": self.f_name,

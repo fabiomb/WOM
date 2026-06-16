@@ -388,6 +388,56 @@ def test_reproductor_modal_con_m(screen, tmp_path):
     assert not overlay.handle_event(click)  # cerrado: deja pasar el input
 
 
+def test_capturing_text_suspende_atajos_globales(screen, tmp_path):
+    """Escribiendo en un campo de texto, las teclas no van al reproductor."""
+    from wom.persistence.settings import Settings
+    from wom.ui.app import _event_to_overlay
+    from wom.ui.multiplayer_screen import MultiplayerScreen
+    from wom.ui.music import MusicPlayer
+    from wom.ui.music_overlay import MusicOverlay
+
+    overlay = MusicOverlay(
+        MusicPlayer(settings=Settings(music_folder=str(tmp_path)),
+                    settings_path=tmp_path / "s.json")
+    )
+    key_m = pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_m})
+    click = pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (0, 0), "button": 1})
+
+    mp = MultiplayerScreen()
+    mp.mode = "connect"
+    assert not mp.capturing_text
+    assert _event_to_overlay(mp, overlay, key_m)  # sin foco: la M abre el player
+
+    mp.focused = "ip"  # foco en un campo de texto
+    assert mp.capturing_text
+    assert not _event_to_overlay(mp, overlay, key_m)  # la M va al campo, no al player
+    assert _event_to_overlay(mp, overlay, click)  # el mouse sigue el camino normal
+
+    overlay.visible = True  # con el player abierto (modal) recupera el control
+    assert _event_to_overlay(mp, overlay, key_m)
+
+
+def test_capturing_text_de_cada_pantalla(screen):
+    """Las pantallas con entrada de texto exponen capturing_text."""
+    from wom.ui.multiplayer_screen import MultiplayerScreen
+
+    menu = MenuScreen()
+    assert not menu.capturing_text
+    menu._editing_folder = "data/music"
+    assert menu.capturing_text
+
+    mp = MultiplayerScreen()
+    assert not mp.capturing_text
+    mp.focused = "name"
+    assert mp.capturing_text
+
+    players = [Player(0, "H"), Player(1, "AI", is_ai=True)]
+    gs = GameScreen(Game.new(MapParams(seed=3), players, VictoryMode.TIME), human_id=0)
+    assert not gs.capturing_text  # sin red no hay chat
+    gs.chat_active = True
+    assert gs.capturing_text
+
+
 def test_menu_esc_retrocede_y_sale(screen):
     menu = MenuScreen()
     menu.draw(screen)

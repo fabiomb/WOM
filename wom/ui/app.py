@@ -28,6 +28,22 @@ WINDOW_TITLE = "WOM"
 HUMAN_ID = 0
 
 
+def _event_to_overlay(current, overlay, event) -> bool:
+    """¿Este evento lo debe ver primero el reproductor modal (atajos globales)?
+
+    Si la pantalla activa está capturando texto (chat, campos editables) y el
+    reproductor está cerrado, las **teclas** van directo a la pantalla: así
+    escribir una "m" no abre el reproductor. El mouse y el caso con el
+    reproductor ya abierto (modal) siguen el camino normal.
+    """
+    capturing = getattr(current, "capturing_text", False)
+    if capturing and not overlay.visible and event.type in (
+        pygame.KEYDOWN, pygame.KEYUP, pygame.TEXTINPUT
+    ):
+        return False
+    return True
+
+
 def new_game(choice: NewGameChoice) -> Game:
     """Crea una partida humano vs AI según lo elegido en el menú."""
     players = [
@@ -84,7 +100,12 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
                 pass  # fin del tema: la playlist ya avanzó
             else:
                 event = scale.translate_event(event)  # mouse físico → lógico
-                if not music_overlay.handle_event(event):
+                consumed = (
+                    music_overlay.handle_event(event)
+                    if _event_to_overlay(current, music_overlay, event)
+                    else False
+                )
+                if not consumed:
                     current.handle_event(event)
 
         if isinstance(current, MenuScreen):

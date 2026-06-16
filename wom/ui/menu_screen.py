@@ -112,6 +112,12 @@ class MenuScreen:
         action, self.action = self.action, None
         return action
 
+    @property
+    def capturing_text(self) -> bool:
+        """True mientras se edita la carpeta de música (suspende atajos globales,
+        p. ej. la M del reproductor)."""
+        return self._editing_folder is not None
+
     # --- input ---------------------------------------------------------------
 
     def handle_event(self, event: pygame.event.Event) -> None:
