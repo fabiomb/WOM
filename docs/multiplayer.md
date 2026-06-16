@@ -275,16 +275,19 @@ Se definen al crear la partida (pantalla de reglas) y viajan en `GAME_SETUP`:
 
 - **Condición de victoria**: las que ya existen (`VictoryMode.TOTAL / FLAGS /
   TIME`).
-- **Turnos máximos**: al alcanzarlos se evalúa una condición de
-  desempate/victoria (territorio y luego tropas, como ya hace `TIME`). Hoy el
-  límite de turnos vive en la lógica de victoria; se expone como parámetro de
-  partida.
-- **Tiempo por turno**: `infinito` o `N` segundos. Es una regla de **UI/sesión**
-  (no del core): cuando el reloj llega a 0, el cliente auto-envía las órdenes
-  que tenga. El reloj corre en ambos lados; el host arbitra si hay discrepancia.
+- **Turnos máximos** (implementado MP5): el host lo fija en `Game.turn_limit`,
+  que **se hornea en el estado inicial** (`to_dict`) y lo evalúa el core de
+  forma idéntica en ambos clientes — al alcanzarlo, desempate por territorio y
+  luego tropas (como `TIME`), en cualquier modo de victoria. Así el límite no
+  depende de que ambos lados apliquen una regla externa por su cuenta.
+- **Tiempo por turno** (implementado MP5): `infinito` (0) o `N` segundos. Es una
+  regla de **UI** (`GameScreen`): el reloj corre mientras el humano puede dar
+  órdenes (no durante la espera del rival ni la animación) y al llegar a 0
+  auto-envía las órdenes que haya. No afecta el determinismo (solo decide
+  *cuándo* se emiten las órdenes locales).
 
-Estas reglas se agrupan en un `MatchRules` (dataclass en `net/` o `core/`)
-serializable.
+El resto (`turn_seconds`, `max_turns`) viaja en `MatchRules`
+(`wom/net/rules.py`) dentro de `GAME_SETUP.rules`.
 
 ---
 
@@ -363,7 +366,7 @@ guardarse en `settings.json` (como las prefs de música/video).
 | MP2 | `net/transport` (TCP, hilo lector, framing) + `net/session` (máquina de estados, handshake, lobby) + `net/config_fingerprint` | test loopback host↔cliente | ✅ hecho |
 | MP3 | UI: menú Multijugador, crear/conectar, sala de espera, ready, cancelar (`ui/multiplayer_screen.py` + `net/rules.py`) | conexión LAN real, lobby funcional | ✅ hecho |
 | MP4 | `GameScreen` en red: `NetGame` (lockstep), intercambio de órdenes, `run_turn` sincronizado, animación local, reorg diferida (`TransferTroopsOrder`/`SplitArmyOrder`) | partida completa 2 humanos LAN | ✅ hecho |
-| MP5 | Reglas (turnos máx, tiempo por turno), chat en sidebar, nombres, indicadores de conexión | partida con reglas + chat | pendiente |
+| MP5 | Reglas (turnos máx vía `Game.turn_limit`, reloj de turno con auto-envío), chat en sidebar, nombres, indicadores de conexión | partida con reglas + chat | ✅ hecho |
 | MP6 | Robustez: desconexión, STATE_SYNC, validación de órdenes, mensajes de error; bump a 0.4.0 | pruebas de caída/cancelación | pendiente |
 
 Cada fase mantiene el core sin tocar (salvo, si hace falta, exponer el límite de

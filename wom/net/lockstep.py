@@ -140,6 +140,8 @@ class NetGame:
 
     def send_chat(self, text: str) -> None:
         self.session.send_chat(text)
+        # El emisor ve su propio mensaje en el mismo log que los recibidos.
+        self.chat_log.append((self.game.players[self.human_id].name, text))
 
     @property
     def waiting(self) -> bool:

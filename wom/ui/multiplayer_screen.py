@@ -149,11 +149,14 @@ class MultiplayerScreen:
         width, height, forts, towns = MAP_SIZES[self.map_size]
         players = [Player(0, host_name), Player(1, client_name)]
         game = Game.new(MapParams(width, height, forts, towns), players, self.victory_mode)
-        self._host_game = game
         self._host_rules = MatchRules(
             turn_seconds=int(self.f_turnsecs.value or 0),
             max_turns=int(self.f_maxturns.value or 50),
         )
+        # El tope de turnos se hornea en el estado (viaja en el to_dict y lo
+        # evalúa el core de forma idéntica en ambos clientes).
+        game.turn_limit = self._host_rules.max_turns
+        self._host_game = game
         return GameSetup(
             state=game.to_dict(),
             rules=self._host_rules.to_dict(),

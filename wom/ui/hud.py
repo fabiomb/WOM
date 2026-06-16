@@ -16,9 +16,12 @@ MAX_ARMY_ROWS = 8  # filas de la lista de ejércitos propios
 
 
 class Hud:
-    def __init__(self, rect: pygame.Rect, human_id: int = 0):
+    def __init__(self, rect: pygame.Rect, human_id: int = 0, net_mode: bool = False):
         self.rect = rect
         self.human_id = human_id
+        # En red el sidebar suma chat e indicadores y no muestra "Guardar", así
+        # que los botones se reacomodan dejando lugar al panel de red abajo.
+        self.net_mode = net_mode
         self.title_font = pygame.font.SysFont(None, 34)
         self.result_font = pygame.font.SysFont(None, 64)
         self.font = pygame.font.SysFont(None, 22)
@@ -26,21 +29,21 @@ class Hud:
         # Ilustraciones de fin de partida (victoria/derrota), cargadas a
         # demanda; None si el asset falta.
         self._result_images: dict[str, pygame.Surface | None] = {}
-        self.button = pygame.Rect(
-            rect.x + 20, rect.bottom - 60, rect.width - 40, 42
-        )
-        self.save_button = pygame.Rect(
-            rect.x + 20, rect.bottom - 110, rect.width - 40, 36
-        )
-        self.create_button = pygame.Rect(
-            rect.x + 20, rect.bottom - 160, rect.width - 40, 42
-        )
+        x, w, bottom = rect.x + 20, rect.width - 40, rect.bottom
+        self.button = pygame.Rect(x, bottom - 60, w, 42)  # fin del turno
+        if net_mode:
+            self.save_button = pygame.Rect(x, bottom - 110, w, 36)  # sin uso en red
+            self.chat_input = pygame.Rect(x, bottom - 104, w, 32)
+            create_y = bottom - 230  # arriba del bloque de chat
+        else:
+            self.save_button = pygame.Rect(x, bottom - 110, w, 36)
+            self.chat_input = pygame.Rect(x, bottom - 104, w, 32)
+            create_y = bottom - 160
+        self.create_button = pygame.Rect(x, create_y, w, 42)
         self._create_button_visible = False
         # Mismo lugar que "Crear ejército": nunca se ven a la vez (fuerte
         # seleccionado vs ejército seleccionado).
-        self.split_button = pygame.Rect(
-            rect.x + 20, rect.bottom - 160, rect.width - 40, 42
-        )
+        self.split_button = pygame.Rect(x, create_y, w, 42)
         self._split_button_visible = False
 
     def hit_end_turn(self, point: tuple[int, int]) -> bool:
@@ -55,6 +58,9 @@ class Hud:
     def hit_split(self, point: tuple[int, int]) -> bool:
         return self._split_button_visible and self.split_button.collidepoint(point)
 
+    def hit_chat_input(self, point: tuple[int, int]) -> bool:
+        return self.net_mode and self.chat_input.collidepoint(point)
+
     def draw(
         self,
         surface: pygame.Surface,
@@ -64,6 +70,7 @@ class Hud:
         creation_pending: bool = False,
         result: VictoryResult | None = None,
         notice: str | None = None,
+        net_panel: dict | None = None,
     ) -> None:
         pygame.draw.rect(surface, theme.SIDEBAR_BG, self.rect)
         x = self.rect.x + 20
@@ -183,19 +190,26 @@ class Hud:
                 )
                 label = self.font.render("Dividir ejército (D)", True, theme.TEXT)
                 surface.blit(label, label.get_rect(center=self.split_button.center))
+            if net_panel is not None:
+                self._draw_net_panel(surface, net_panel)
             if notice:
                 rendered = self.small_font.render(notice, True, theme.SELECTION)
+                anchor = (
+                    self.create_button.top - 6 if net_panel is not None
+                    else self.save_button.top - 8
+                )
                 surface.blit(
                     rendered,
-                    rendered.get_rect(midbottom=(self.rect.centerx, self.save_button.top - 8)),
+                    rendered.get_rect(midbottom=(self.rect.centerx, anchor)),
                 )
-            over = self.save_button.collidepoint(scale.mouse_pos())
-            pygame.draw.rect(
-                surface, (70, 78, 86) if over else (50, 56, 62),
-                self.save_button, border_radius=6,
-            )
-            label = self.small_font.render("Guardar partida (G)", True, theme.TEXT)
-            surface.blit(label, label.get_rect(center=self.save_button.center))
+            if net_panel is None:  # en red no se guarda
+                over = self.save_button.collidepoint(scale.mouse_pos())
+                pygame.draw.rect(
+                    surface, (70, 78, 86) if over else (50, 56, 62),
+                    self.save_button, border_radius=6,
+                )
+                label = self.small_font.render("Guardar partida (G)", True, theme.TEXT)
+                surface.blit(label, label.get_rect(center=self.save_button.center))
             over = self.button.collidepoint(scale.mouse_pos())
             pygame.draw.rect(
                 surface, theme.BUTTON_BG_OVER if over else theme.BUTTON_BG,
@@ -203,6 +217,64 @@ class Hud:
             )
             label = self.font.render("Fin del turno (Enter)", True, theme.TEXT)
             surface.blit(label, label.get_rect(center=self.button.center))
+
+    def _draw_net_panel(self, surface: pygame.Surface, panel: dict) -> None:
+        """Indicadores de red (estado/timer), log de chat y caja de entrada.
+
+        Se dibuja anclado abajo del sidebar, sobre el botón de fin de turno.
+        """
+        x = self.rect.x + 20
+        box = self.chat_input
+        max_w = box.width - 16
+        line_h = self.small_font.get_height() + 2
+
+        # Log de chat: las últimas líneas, justo encima de la caja de entrada.
+        log = panel.get("chat_log", [])[-5:]
+        ly = box.top - 6 - len(log) * line_h
+        for name, text in log:
+            line = self._fit(f"{name}: {text}", self.small_font, max_w)
+            surface.blit(self.small_font.render(line, True, theme.TEXT), (x, ly))
+            ly += line_h
+
+        # Estado de conexión y reloj de turno, encima del log.
+        sy = box.top - 6 - len(log) * line_h - 2 * line_h - 6
+        if panel.get("disconnected"):
+            status, color = "Rival desconectado", (210, 80, 80)
+        elif panel.get("waiting"):
+            status, color = "Esperando al rival…", (235, 205, 90)
+        else:
+            status = f"En partida con {panel.get('peer_name') or 'rival'}"
+            color = (120, 200, 120)
+        surface.blit(self.small_font.render(status, True, color), (x, sy))
+        seconds = panel.get("seconds_left")
+        if seconds is not None:
+            timer = f"Tiempo de turno: {seconds}s"
+            tcolor = (210, 80, 80) if seconds <= 5 else theme.TEXT_DIM
+            surface.blit(self.small_font.render(timer, True, tcolor), (x, sy + line_h))
+
+        # Caja de entrada de chat.
+        active = panel.get("chat_active")
+        pygame.draw.rect(surface, (30, 34, 40), box, border_radius=6)
+        border = theme.SELECTION if active else (90, 96, 104)
+        pygame.draw.rect(surface, border, box, 2, border_radius=6)
+        if active:
+            shown, col = panel.get("chat_buffer", "") + "_", theme.TEXT
+        elif panel.get("chat_buffer"):
+            shown, col = panel["chat_buffer"], theme.TEXT
+        else:
+            shown, col = "T para chatear…", theme.TEXT_DIM
+        surface.blit(
+            self.small_font.render(self._fit(shown, self.small_font, max_w), True, col),
+            (box.x + 8, box.y + 7),
+        )
+
+    def _fit(self, text: str, font: pygame.font.Font, max_w: int) -> str:
+        """Recorta el texto con elipsis para que entre en `max_w` píxeles."""
+        if font.size(text)[0] <= max_w:
+            return text
+        while text and font.size(text + "…")[0] > max_w:
+            text = text[:-1]
+        return text + "…"
 
     def _draw_army_list(
         self, surface: pygame.Surface, game: Game, selected: Army | None, x: int, y: int

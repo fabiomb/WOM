@@ -78,6 +78,20 @@ def test_no_hay_retirada_dentro_de_un_fuerte():
     assert fort.owner == 1  # el atacante no pudo entrar a capturar
 
 
+def test_turn_limit_termina_la_partida_en_cualquier_modo():
+    """El tope de turnos del host (turn_limit) corta la partida con desempate
+    por territorio/tropas, incluso en modo conquista total."""
+    game = _make_game(victory_mode=VictoryMode.TOTAL)
+    game.turn_limit = 2
+    game.spawn_army(0, (1, 1), {"soldado": 10})
+    game.spawn_army(1, (6, 1), {"soldado": 10})  # ambos vivos: no hay total
+    assert not game.run_turn([]).is_over  # turno 1 < 2
+    result = game.run_turn([])  # turno 2 == límite
+    assert result.is_over and result.mode is VictoryMode.TIME
+    # El tope viaja en el estado (lo reconstruye el cliente en red).
+    assert Game.from_dict(game.to_dict()).turn_limit == 2
+
+
 def test_transfer_troops_order_se_aplica_en_el_turno():
     """La reorganización diferida del humano en red: TransferTroopsOrder mueve
     tropas entre dos ejércitos aledaños en la fase de órdenes."""

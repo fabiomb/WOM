@@ -97,6 +97,11 @@ class Game:
     rng: random.Random
     seed: int
     turn: int = 0
+    # Tope de turnos configurable (lo fija el host en una partida en red). Si
+    # se alcanza, la partida termina con un desempate por territorio/tropas, en
+    # cualquier modo de victoria. None ⇒ sin tope explícito (en modo TIME se usa
+    # el default de config; en otros modos no hay límite, como un jugador).
+    turn_limit: int | None = None
     # Batallas libradas en toda la partida (acumulado, todas las facciones).
     # Se serializa para mostrarlo en la pantalla de fin de partida.
     battles_fought: int = 0
@@ -534,6 +539,7 @@ class Game:
         return {
             "seed": self.seed,
             "turn": self.turn,
+            "turn_limit": self.turn_limit,
             "battles_fought": self.battles_fought,
             "victory_mode": self.victory_mode.value,
             "world": self.world.to_dict(),
@@ -559,6 +565,7 @@ class Game:
             rng=rng,
             seed=data["seed"],
             turn=data["turn"],
+            turn_limit=data.get("turn_limit"),  # compat con saves sin tope
             # Compat con saves previos sin contador de batallas.
             battles_fought=data.get("battles_fought", 0),
             # Compat con saves previos a las cruces con edad ([x, y]): se les

@@ -157,17 +157,28 @@ def test_guardar_esta_deshabilitado_en_red(screen):
 
 
 class _FakeNet:
-    """Net mínimo para probar la reorganización diferida sin sockets."""
+    """Net mínimo para probar UI (reorg, reloj de turno) sin sockets."""
 
-    waiting = False
-    disconnected = False
-    desync = False
+    def __init__(self):
+        self.waiting = False
+        self.disconnected = False
+        self.desync = False
+        self.chat_log = []
+        self.peer_name = "Rival"
+        self.submitted = None
 
     def update(self):
         pass
 
     def consume_resolved(self):
         return None
+
+    def submit_local_orders(self, orders):
+        self.submitted = list(orders)
+        self.waiting = True
+
+    def send_chat(self, text):
+        self.chat_log.append(("Yo", text))
 
 
 def test_fusion_en_red_se_difiere_como_orden(screen):
@@ -220,3 +231,68 @@ def test_division_en_red_se_difiere_como_orden(screen):
     assert army.composition == {"soldado": 8, "arquero": 4}
     assert len(gs.pending_reorg) == 1
     assert isinstance(gs.pending_reorg[0], SplitArmyOrder)
+
+
+def test_reloj_de_turno_auto_envia_al_vencer(screen):
+    game = _new_game(1)
+    net = _FakeNet()
+    gs = GameScreen(game, human_id=0, net=net, turn_seconds=10)
+    gs.update()  # arma el deadline
+    assert gs._turn_deadline is not None and net.submitted is None
+    gs._turn_deadline = pygame.time.get_ticks() - 1  # forzar vencimiento
+    gs.update()
+    assert net.submitted is not None  # se envió el turno solo
+    assert net.waiting
+
+
+def test_chat_se_escribe_y_aparece_en_el_log(screen):
+    game = _new_game(1)
+    net = _FakeNet()
+    gs = GameScreen(game, human_id=0, net=net)
+
+    def key(k, ch=""):
+        gs.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": k, "unicode": ch}))
+
+    key(pygame.K_t)  # abre el chat
+    assert gs.chat_active
+    for ch in "hola":
+        key(0, ch)
+    assert gs.chat_buffer == "hola"
+    key(pygame.K_RETURN)  # envía
+    assert not gs.chat_active and gs.chat_buffer == ""
+    assert net.chat_log[-1] == ("Yo", "hola")
+    gs.draw(screen)  # el panel de chat no debe romper el dibujo
+
+
+def test_chat_real_entre_dos_gamescreens(screen):
+    server, host_s, client_s = _playing_sessions()
+    hg, cg = _new_game(1), _new_game(1)
+    host_net = NetGame(host_s, hg, human_id=0, is_host=True, peer_name="Cliente")
+    client_net = NetGame(client_s, cg, human_id=1, is_host=False, peer_name="Host")
+    host_gs = GameScreen(hg, human_id=0, net=host_net)
+    client_gs = GameScreen(cg, human_id=1, net=client_net)
+    try:
+        host_gs.chat_active = True
+        host_gs.chat_buffer = "buenas"
+        host_gs.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_RETURN}))
+        assert ("Host", "buenas") in host_net.chat_log  # el emisor lo ve
+
+        deadline = time.time() + 2.0
+        while not client_net.chat_log and time.time() < deadline:
+            client_gs.update()
+            time.sleep(0.005)
+        assert ("Host", "buenas") in client_net.chat_log  # llegó al rival
+    finally:
+        host_s.connection.close()
+        client_s.connection.close()
+        server.close()
+
+
+def test_panel_de_red_se_dibuja_en_los_distintos_estados(screen):
+    game = _new_game(1)
+    net = _FakeNet()
+    gs = GameScreen(game, human_id=0, net=net, turn_seconds=30)
+    net.chat_log = [("Host", "hola"), ("Rival", "qué tal")]
+    for waiting, disc in ((False, False), (True, False), (False, True)):
+        net.waiting, net.disconnected = waiting, disc
+        gs.draw(screen)  # no debe romper en ningún estado

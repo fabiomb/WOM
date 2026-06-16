@@ -46,10 +46,14 @@ def check_victory(game: "Game", mode: VictoryMode) -> VictoryResult:
         result = _check_flags(game)
         if result.is_over:
             return result
-    if mode is VictoryMode.TIME:
+    # Tope de turnos: un `turn_limit` explícito (lo fija el host en red) actúa
+    # como límite duro en cualquier modo; sin él, solo el modo TIME usa el
+    # default de config. Al alcanzarlo se desempata por territorio/tropas.
+    limit = game.turn_limit
+    if limit is None and mode is VictoryMode.TIME:
         limit = game.config["turnos_limite_default"]
-        if game.turn >= limit:
-            return _check_time(game)
+    if limit is not None and game.turn >= limit:
+        return _check_time(game)
     return ONGOING
 
 

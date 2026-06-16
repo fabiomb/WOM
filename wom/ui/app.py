@@ -46,7 +46,12 @@ def _start_net_game(net_start) -> GameScreen:
         is_host=(net_start.role == "host"),
         peer_name=net_start.peer_name,
     )
-    return GameScreen(net_start.game, human_id=net_start.human_id, net=net)
+    return GameScreen(
+        net_start.game,
+        human_id=net_start.human_id,
+        net=net,
+        turn_seconds=net_start.rules.turn_seconds,
+    )
 
 
 def run(seed: int | None = None, ai_level: str = "medio") -> None:

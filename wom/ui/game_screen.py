@@ -75,12 +75,19 @@ class GameScreen:
         human_id: int = 0,
         ai_level: str = "facil",
         net=None,
+        turn_seconds: int = 0,
     ):
         self.game = game
         self.human_id = human_id
         # Modo red (humano vs humano): el par aporta sus órdenes por la red en
         # vez de la AI, y el turno se resuelve cuando llegan las dos listas.
         self.net = net
+        # Reloj de turno (0 = sin límite): al vencer, se envían las órdenes que
+        # haya. Estado del chat del sidebar (modo red).
+        self.turn_seconds = turn_seconds
+        self._turn_deadline: int | None = None
+        self.chat_active = False
+        self.chat_buffer = ""
         # El nivel viaja en Player.ai_level (savegames); el parámetro es fallback.
         # La personalidad se deriva de la seed: misma partida => misma
         # personalidad, también al recargar un savegame. En red no hay AI.
@@ -151,6 +158,7 @@ class GameScreen:
         self.hud = Hud(
             pygame.Rect(map_area.right, 0, theme.SIDEBAR_WIDTH, window.height),
             human_id=human_id,
+            net_mode=net is not None,
         )
 
     @property
@@ -197,6 +205,10 @@ class GameScreen:
                 self.pending_quit = False
             elif choice is False:
                 self.pending_quit = False
+            return
+        # El chat (modo red) se atiende antes que los bloqueos de animación o
+        # de espera: se puede escribir en cualquier momento.
+        if self.net is not None and self._handle_chat(event):
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             if self.game_over:
@@ -481,6 +493,44 @@ class GameScreen:
         self.notice = text
         self.notice_until = pygame.time.get_ticks() + 3000
 
+    # --- chat (modo red) -------------------------------------------------------
+
+    def _handle_chat(self, event: pygame.event.Event) -> bool:
+        """Maneja la entrada de chat. Devuelve True si consumió el evento."""
+        if self.chat_active:
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    text = self.chat_buffer.strip()
+                    if text:
+                        self.net.send_chat(text)
+                    self.chat_buffer = ""
+                    self.chat_active = False
+                elif event.key == pygame.K_ESCAPE:
+                    self.chat_buffer = ""
+                    self.chat_active = False
+                elif event.key == pygame.K_BACKSPACE:
+                    self.chat_buffer = self.chat_buffer[:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    if len(self.chat_buffer) < 120:
+                        self.chat_buffer += event.unicode
+                return True
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                self.chat_active = False  # click afuera: cierra el chat
+                return True
+            return False
+        # Inactivo: T o click en la caja lo abren.
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_t:
+            self.chat_active = True
+            return True
+        if (
+            event.type == pygame.MOUSEBUTTONDOWN
+            and event.button == 1
+            and self.hud.hit_chat_input(event.pos)
+        ):
+            self.chat_active = True
+            return True
+        return False
+
     # --- turno ---------------------------------------------------------------
 
     def _local_orders(self) -> list[Order]:
@@ -551,6 +601,22 @@ class GameScreen:
         if self.net.desync and not self._net_desync_shown:
             self._net_desync_shown = True
             self._notify("¡Desincronización detectada! (resync en MP6)")
+        self._update_turn_timer()
+
+    def _update_turn_timer(self) -> None:
+        """Reloj de turno: cuenta solo mientras el humano puede dar órdenes; al
+        vencer envía el turno con lo que haya (como el humano apurado)."""
+        if self.turn_seconds <= 0 or self.game_over:
+            return
+        if self.waiting_peer or self.animating:
+            self._turn_deadline = None  # no corre mientras espera o anima
+            return
+        now = pygame.time.get_ticks()
+        if self._turn_deadline is None:
+            self._turn_deadline = now + self.turn_seconds * 1000
+        elif now >= self._turn_deadline:
+            self._turn_deadline = None
+            self.end_turn()
 
     # --- dibujo ----------------------------------------------------------------
 
@@ -604,6 +670,7 @@ class GameScreen:
         self.hud.draw(
             surface, self.game, selected, fort,
             self.selected_fort in self.pending_creations, result, notice,
+            net_panel=self._net_panel(animating),
         )
         if self.pending_merge is not None:
             self.merge_picker.draw(surface)
@@ -614,6 +681,30 @@ class GameScreen:
                 surface, "¿Salir al menú?",
                 "La partida no guardada se pierde", "Salir (S)",
             )
+
+    def _net_panel(self, animating: bool) -> dict | None:
+        """Datos para el panel de red del HUD (chat, estado, reloj de turno)."""
+        if self.net is None:
+            return None
+        seconds_left = None
+        if (
+            self.turn_seconds > 0
+            and self._turn_deadline is not None
+            and not self.waiting_peer
+            and not animating
+            and not self.game_over
+        ):
+            remaining = self._turn_deadline - pygame.time.get_ticks()
+            seconds_left = max(0, (remaining + 999) // 1000)
+        return {
+            "chat_log": self.net.chat_log,
+            "chat_active": self.chat_active,
+            "chat_buffer": self.chat_buffer,
+            "seconds_left": seconds_left,
+            "peer_name": self.net.peer_name,
+            "waiting": self.waiting_peer,
+            "disconnected": self.net.disconnected,
+        }
 
     def _update_camera(self) -> None:
         """Paneo por bordes: con el mouse pegado al borde de la ventana la
