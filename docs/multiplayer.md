@@ -367,7 +367,10 @@ guardarse en `settings.json` (como las prefs de música/video).
 | MP3 | UI: menú Multijugador, crear/conectar, sala de espera, ready, cancelar (`ui/multiplayer_screen.py` + `net/rules.py`) | conexión LAN real, lobby funcional | ✅ hecho |
 | MP4 | `GameScreen` en red: `NetGame` (lockstep), intercambio de órdenes, `run_turn` sincronizado, animación local, reorg diferida (`TransferTroopsOrder`/`SplitArmyOrder`) | partida completa 2 humanos LAN | ✅ hecho |
 | MP5 | Reglas (turnos máx vía `Game.turn_limit`, reloj de turno con auto-envío), chat en sidebar, nombres, indicadores de conexión | partida con reglas + chat | ✅ hecho |
-| MP6 | Robustez: desconexión, STATE_SYNC, validación de órdenes, mensajes de error; bump a 0.4.0 | pruebas de caída/cancelación | pendiente |
+| MP6 | Robustez: desconexión (vuelta al menú), `StateSync` autoritativo (`Game.load_state` in-place), validación de órdenes, mensajes de error; bump a 0.4.0 | pruebas de caída/cancelación/resync | ✅ hecho |
+
+**Estado: v0.4.0 multiplayer completo** — partida humano vs humano por LAN de
+punta a punta (lobby, lockstep, reglas, chat, robustez), validada headless.
 
 Cada fase mantiene el core sin tocar (salvo, si hace falta, exponer el límite de
 turnos como parámetro — cambio menor y testeado).

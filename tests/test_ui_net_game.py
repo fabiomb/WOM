@@ -143,6 +143,45 @@ def test_dos_gamescreens_humano_vs_humano(screen):
         server.close()
 
 
+def test_desconexion_bloquea_y_sale_directo_al_menu(screen):
+    server, host_s, client_s = _playing_sessions()
+    game = _new_game(1)
+    net = NetGame(host_s, game, human_id=0, is_host=True)
+    gs = GameScreen(game, human_id=0, net=net)
+    try:
+        client_s.connection.close()  # el rival se cae
+        deadline = time.time() + 3.0
+        while not gs.net_disconnected and time.time() < deadline:
+            gs.update()
+            time.sleep(0.005)
+        assert gs.net_disconnected
+        gs.draw(screen)  # el panel muestra "Rival desconectado" sin romper
+
+        # ESC vuelve directo al menú, sin diálogo de confirmación.
+        gs.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE}))
+        assert gs.wants_menu and not gs.pending_quit
+    finally:
+        host_s.connection.close()
+        server.close()
+
+
+def test_resync_limpia_las_ordenes_en_curso(screen):
+    """Al adoptar el estado del host, la UI descarta las órdenes en curso."""
+    game = _new_game(1)
+
+    class _ResyncNet(_FakeNet):
+        def __init__(self):
+            super().__init__()
+            self.resynced = True
+
+    gs = GameScreen(game, human_id=0, net=_ResyncNet())
+    gs.pending_paths[123] = [(1, 1)]
+    gs.selected_id = 123
+    gs.update()
+    assert gs.pending_paths == {} and gs.selected_id is None
+    assert gs.net.resynced is False  # se consumió la señal
+
+
 def test_guardar_esta_deshabilitado_en_red(screen):
     server, host_s, client_s = _playing_sessions()
     game = _new_game(1)
@@ -163,6 +202,7 @@ class _FakeNet:
         self.waiting = False
         self.disconnected = False
         self.desync = False
+        self.resynced = False
         self.chat_log = []
         self.peer_name = "Rival"
         self.submitted = None

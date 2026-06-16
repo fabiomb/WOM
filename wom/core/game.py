@@ -550,6 +550,30 @@ class Game:
             "rng_state": _encode_rng_state(self.rng.getstate()),
         }
 
+    def load_state(self, data: dict) -> None:
+        """Adopta un estado externo *in-place* (mismo objeto Game).
+
+        Lo usa la resincronización del multiplayer: el cliente reemplaza su
+        estado por el autoritativo del host sin recrear el objeto, así las
+        referencias que mantienen el renderer y la UI siguen siendo válidas.
+        Config, clases, modo de victoria y seed no cambian (son los mismos).
+        """
+        fresh = Game.from_dict(data)
+        self.world = fresh.world
+        self.players = fresh.players
+        self.armies = fresh.armies
+        self.turn = fresh.turn
+        self.turn_limit = fresh.turn_limit
+        self.battles_fought = fresh.battles_fought
+        self.crosses = fresh.crosses
+        self.next_army_id = fresh.next_army_id
+        self.rng.setstate(fresh.rng.getstate())
+        for transient in (
+            self.last_battles, self.last_clashes, self.last_moves, self._battle_queue
+        ):
+            transient.clear()
+        self.last_retreats.clear()
+
     @classmethod
     def from_dict(cls, data: dict) -> "Game":
         """Reconstruye una partida guardada; la config se relee de data/."""

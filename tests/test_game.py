@@ -92,6 +92,18 @@ def test_turn_limit_termina_la_partida_en_cualquier_modo():
     assert Game.from_dict(game.to_dict()).turn_limit == 2
 
 
+def test_load_state_adopta_estado_in_place():
+    """La resincronización del multiplayer: un Game adopta otro estado sin
+    recrear el objeto (las referencias del renderer siguen válidas)."""
+    a = _make_game()
+    a.spawn_army(0, (1, 1), {"soldado": 10})
+    a.run_turn([])
+    b = _make_game()  # mismo objeto que se va a mutar
+    b.load_state(a.to_dict())
+    assert b.to_dict() == a.to_dict()
+    assert b.turn == a.turn and len(b.armies) == len(a.armies)
+
+
 def test_transfer_troops_order_se_aplica_en_el_turno():
     """La reorganización diferida del humano en red: TransferTroopsOrder mueve
     tropas entre dos ejércitos aledaños en la fase de órdenes."""

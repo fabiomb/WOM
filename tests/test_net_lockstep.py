@@ -155,6 +155,35 @@ def test_canonical_order_is_stable_regardless_of_input_order():
     assert kinds.index("MoveOrder") == len(kinds) - 1
 
 
+def test_resync_recovers_a_diverged_client():
+    """Si el cliente diverge (bug de determinismo), el host detecta el mismatch
+    de hash, le reenvía su estado autoritativo (StateSync) y el cliente lo
+    adopta, volviendo a quedar idéntico."""
+    server, host_s, client_s = _playing_sessions()
+    host_net = NetGame(host_s, _new_game(1), human_id=0, is_host=True)
+    client_net = NetGame(client_s, _new_game(1), human_id=1, is_host=False)
+    try:
+        # Fuerza una divergencia antes de resolver el turno.
+        client_net.game.players[0].food += 999
+        assert host_net.game.to_dict() != client_net.game.to_dict()
+
+        host_net.submit_local_orders([])
+        client_net.submit_local_orders([])
+        deadline = time.time() + 3.0
+        while not client_net.resynced and time.time() < deadline:
+            host_net.update()
+            client_net.update()
+            time.sleep(0.005)
+
+        assert host_net.desync  # el host detectó el mismatch
+        assert client_net.resynced  # el cliente adoptó el estado del host
+        assert client_net.game.to_dict() == host_net.game.to_dict()
+    finally:
+        host_s.connection.close()
+        client_s.connection.close()
+        server.close()
+
+
 def test_peer_orders_referencing_own_armies_are_dropped():
     """El validador descarta órdenes del par que toquen ejércitos propios."""
     server, host_s, client_s = _playing_sessions()

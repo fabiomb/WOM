@@ -110,6 +110,8 @@ class NetGame:
         self.disconnected = False
         self.disconnect_reason = ""
         self.desync = False
+        self._sync_sent = False  # el host manda un solo StateSync por divergencia
+        self.resynced = False    # el cliente adoptó un estado autoritativo
         # (resultado, snapshot pre-turno) del último turno resuelto, para que
         # la UI lo anime; lo consume `consume_resolved`.
         self._resolved: tuple[VictoryResult, list[dict]] | None = None
@@ -158,7 +160,7 @@ class NetGame:
         elif isinstance(event, ChatReceived):
             self.chat_log.append((event.name, event.text))
         elif isinstance(event, StateSyncReceived):
-            pass  # resincronización autoritativa: fase MP6
+            self._apply_state_sync(event.state)
         elif isinstance(event, Disconnected):
             self.disconnected = True
             self.disconnect_reason = event.reason
@@ -214,3 +216,21 @@ class NetGame:
         peer = self._peer_hashes.get(turn)
         if local is not None and peer is not None and local != peer:
             self.desync = True
+            # El host es la autoridad: reenvía su estado completo para que el
+            # cliente se resincronice (red de seguridad ante un bug raro de
+            # determinismo). Uno solo por divergencia, para no spamear.
+            if self.is_host and not self._sync_sent:
+                self._sync_sent = True
+                self.session.send_state_sync(self.game.turn, self.game.to_dict())
+
+    def _apply_state_sync(self, state: dict) -> None:
+        """Cliente: adopta el estado autoritativo del host y reanuda limpio."""
+        if self.is_host:
+            return  # el host no se resincroniza con nadie
+        self.game.load_state(state)
+        self._turn = self.game.turn
+        self._local_orders = None
+        self._peer_orders.clear()
+        self.desync = False
+        self.resynced = True
+        self.phase = Phase.COLLECTING

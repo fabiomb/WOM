@@ -176,6 +176,10 @@ class GameScreen:
         """En red: las órdenes locales ya se enviaron y falta el rival."""
         return self.net is not None and self.net.waiting
 
+    @property
+    def net_disconnected(self) -> bool:
+        return self.net is not None and self.net.disconnected
+
     def _animation_elapsed(self) -> float:
         return (pygame.time.get_ticks() - self.animation_start) / 1000.0
 
@@ -211,8 +215,8 @@ class GameScreen:
         if self.net is not None and self._handle_chat(event):
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            if self.game_over:
-                self.wants_menu = True  # partida terminada: sale directo
+            if self.game_over or self.net_disconnected:
+                self.wants_menu = True  # terminada o rival caído: sale directo
             elif self.selected_id is not None or self.selected_fort is not None:
                 # Primero deselecciona (la ruta trazada queda confirmada);
                 # otro ESC recién abre el diálogo de salida.
@@ -255,6 +259,8 @@ class GameScreen:
             ):
                 self.animation.skip()
             return
+        if self.net_disconnected:
+            return  # rival caído: no se aceptan más órdenes
         if self.waiting_peer:
             return  # órdenes enviadas: no se editan ni se reenvían hasta el rival
         if self.game_over:
@@ -595,12 +601,23 @@ class GameScreen:
             self.animation = build_turn_animation(self.game, pre_turn)
             self.animation_start = pygame.time.get_ticks()
             self.notice = None  # se acabó la espera
+        if self.net.resynced:
+            self.net.resynced = False
+            # El estado se reemplazó por el del host: descarto las órdenes en
+            # curso (referían al estado viejo) y deselecciono.
+            self.pending_paths.clear()
+            self.pending_creations.clear()
+            self.pending_reorg = []
+            self.selected_id = None
+            self.selected_fort = None
+            self.animation = None
+            self._notify("Resincronizado con el host")
+        if self.net.desync and not self._net_desync_shown:
+            self._net_desync_shown = True  # host: avisa que resincroniza al rival
+            self._notify("Divergencia detectada: resincronizando al rival")
         if self.net.disconnected and not self._net_disconnect_shown:
             self._net_disconnect_shown = True
             self._notify(f"Rival desconectado: {self.net.disconnect_reason}")
-        if self.net.desync and not self._net_desync_shown:
-            self._net_desync_shown = True
-            self._notify("¡Desincronización detectada! (resync en MP6)")
         self._update_turn_timer()
 
     def _update_turn_timer(self) -> None:

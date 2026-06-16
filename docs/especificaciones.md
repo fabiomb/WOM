@@ -233,9 +233,14 @@ Mejoras sobre el motor de scoring de objetivos para que la AI gestione mejor sus
 * El `ai.json` pasó a tener dos secciones (`niveles` y `personalidades`); el cargador (`load_ai_config` / `load_ai_personalities`) es retrocompatible con el formato anterior. El balance se revalidó con `tools/simulate.py` manteniendo difícil > medio > fácil.
 
 
-## 11. Fase 2 — Multiplayer (v0.4.0)
+## 11. Fase 2 — Multiplayer (v0.4.0) ✅ implementado
 
-El diseño completo vive en [`docs/multiplayer.md`](multiplayer.md).
+El diseño completo (y el estado de las fases MP1–MP6) vive en
+[`docs/multiplayer.md`](multiplayer.md). Una partida humano vs humano por LAN ya
+es jugable de punta a punta: lobby (crear/conectar/listo), lockstep determinista
+con verificación de hash y resincronización autoritativa, reglas del host
+(victoria, turnos máximos, tiempo por turno), chat en el sidebar, nombres e
+indicadores de conexión, y manejo de desconexión.
 
 ### Diseño de multiplayer
 
