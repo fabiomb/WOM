@@ -240,10 +240,25 @@ def build_turn_animation(game, pre_turn_armies: list[dict]) -> TurnAnimation | N
     """
     motions: list[ArmyMotion] = []
     seen: set[int] = set()
+    # Ejércitos que pelearon (atacante o defensor) y posiciones donde quedó una
+    # cruz este turno: sirven para distinguir un ejército ABSORBIDO por una
+    # fusión —desaparecido antes del movimiento, sin batalla ni cruz— de uno
+    # que murió. El absorbido no debe animarse quieto durante toda la marcha
+    # (haría parecer que la fusión ocurre DESPUÉS del avance): se omite, así la
+    # fusión se ve resuelta antes de mover.
+    clash_ids = {aid for clash in game.last_clashes for aid in clash}
+    recent_crosses = {(c[0], c[1]) for c in game.crosses if c[2] == game.turn - 1}
     for data in pre_turn_armies:
         army_id = data["id"]
         seen.add(army_id)
         current = game.army_by_id(army_id)
+        if (
+            current is None
+            and army_id not in clash_ids
+            and army_id not in game.last_moves
+            and tuple(data["position"]) not in recent_crosses
+        ):
+            continue  # absorbido por una fusión: ya no está al empezar la marcha
         waypoints = game.last_moves.get(army_id) or [tuple(data["position"])]
         # Conteo final: evita el "salto" al terminar la animación. Para los
         # que pelearon, TurnAnimation muestra el previo hasta el choque.

@@ -165,6 +165,35 @@ def test_desconexion_bloquea_y_sale_directo_al_menu(screen):
         server.close()
 
 
+def test_salir_al_menu_avisa_al_rival(screen):
+    """Al volver al menú en plena partida en red, el host avisa al rival (Bye)
+    y cierra la sesión: el cliente recibe el corte en vez de esperar para
+    siempre las órdenes del que ya salió."""
+    from wom.net.session import Disconnected
+
+    server, host_s, client_s = _playing_sessions()
+    game = _new_game(1)
+    net = NetGame(host_s, game, human_id=0, is_host=True)
+    gs = GameScreen(game, human_id=0, net=net)
+    try:
+        gs._leave_to_menu()
+        assert gs.wants_menu
+        assert host_s.state is SessionState.CLOSED
+
+        deadline = time.time() + 3.0
+        events = []
+        while time.time() < deadline:
+            events += client_s.update()
+            if any(isinstance(e, Disconnected) for e in events):
+                break
+            time.sleep(0.005)
+        assert any(isinstance(e, Disconnected) for e in events)
+    finally:
+        host_s.connection.close()
+        client_s.connection.close()
+        server.close()
+
+
 def test_resync_limpia_las_ordenes_en_curso(screen):
     """Al adoptar el estado del host, la UI descarta las órdenes en curso."""
     game = _new_game(1)

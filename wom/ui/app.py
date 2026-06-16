@@ -95,6 +95,10 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                # Cerrar la ventana en plena partida en red: avisar al rival
+                # (Bye) para que no quede esperando órdenes.
+                if isinstance(current, GameScreen) and current.net is not None:
+                    current.net.session.cancel("el rival cerró el juego")
                 running = False
             elif music.handle_event(event):
                 pass  # fin del tema: la playlist ya avanzó

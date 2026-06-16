@@ -201,6 +201,32 @@ def test_build_muestra_tropas_previas_durante_el_choque():
     assert revealed[strong.id] == strong.total_troops < 100
 
 
+def test_build_turn_animation_omite_al_fusionado():
+    """Un ejército absorbido por una fusión (modo red: reorg diferida que se
+    aplica antes del movimiento) no debe animarse quieto durante la marcha: se
+    omite, así la fusión se ve resuelta antes de que el otro avance."""
+    from wom.core.orders import MergeArmyOrder
+
+    game = _make_game()
+    target = game.spawn_army(0, (1, 1), {"soldado": 10})
+    source = game.spawn_army(0, (1, 2), {"soldado": 5})  # adyacente, se fusiona
+    pre_turn = [a.to_dict() for a in game.armies]
+    game.run_turn(
+        [
+            MergeArmyOrder(source_id=source.id, target_id=target.id),
+            MoveOrder(army_id=target.id, path=((2, 1), (3, 1))),
+        ]
+    )
+    assert game.army_by_id(source.id) is None  # absorbido (sin cruz)
+
+    anim = build_turn_animation(game, pre_turn)
+    ids = {m.army_id for m in anim.motions}
+    assert source.id not in ids  # no aparece quieto durante la marcha
+    by_id = {m.army_id: m for m in anim.motions}
+    assert by_id[target.id].waypoints == [(1, 1), (2, 1), (3, 1)]
+    assert by_id[target.id].troops == 15  # ya con las tropas fusionadas
+
+
 def test_build_turn_animation_conserva_a_los_muertos():
     game = _make_game()
     strong = game.spawn_army(0, (1, 1), {"soldado": 100})

@@ -211,7 +211,7 @@ class GameScreen:
         if self.pending_quit:
             choice = self._confirm_choice(event)
             if choice is True:
-                self.wants_menu = True
+                self._leave_to_menu()
                 self.pending_quit = False
             elif choice is False:
                 self.pending_quit = False
@@ -222,7 +222,7 @@ class GameScreen:
             return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             if self.game_over or self.net_disconnected:
-                self.wants_menu = True  # terminada o rival caído: sale directo
+                self._leave_to_menu()  # terminada o rival caído: sale directo
             elif self.selected_id is not None or self.selected_fort is not None:
                 # Primero deselecciona (la ruta trazada queda confirmada);
                 # otro ESC recién abre el diálogo de salida.
@@ -398,6 +398,13 @@ class GameScreen:
             if no is not None and no.collidepoint(event.pos):
                 return False
         return None
+
+    def _leave_to_menu(self) -> None:
+        """Pide volver al menú. En red avisa al rival (Bye) y cierra la sesión,
+        para que no quede esperando órdenes de un jugador que ya salió."""
+        if self.net is not None:
+            self.net.session.cancel("el rival salió de la partida")
+        self.wants_menu = True
 
     def _confirm_merge(self) -> None:
         source_id, target_id = self.pending_merge
