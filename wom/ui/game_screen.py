@@ -39,7 +39,13 @@ import pygame
 from wom.ai.ai_player import AIPlayer, choose_personality
 from wom.core.config import load_ai_personalities
 from wom.core.game import Game
-from wom.core.orders import CreateArmyOrder, MoveOrder, Order
+from wom.core.orders import (
+    CreateArmyOrder,
+    MoveOrder,
+    Order,
+    SplitArmyOrder,
+    TransferTroopsOrder,
+)
 from wom.core.pathfind import shortest_path
 from wom.core.victory import VictoryResult
 from wom.core.worldmap import Coord
@@ -63,22 +69,41 @@ def _manhattan(a: Coord, b: Coord) -> int:
 
 
 class GameScreen:
-    def __init__(self, game: Game, human_id: int = 0, ai_level: str = "facil"):
+    def __init__(
+        self,
+        game: Game,
+        human_id: int = 0,
+        ai_level: str = "facil",
+        net=None,
+    ):
         self.game = game
         self.human_id = human_id
+        # Modo red (humano vs humano): el par aporta sus órdenes por la red en
+        # vez de la AI, y el turno se resuelve cuando llegan las dos listas.
+        self.net = net
         # El nivel viaja en Player.ai_level (savegames); el parámetro es fallback.
         # La personalidad se deriva de la seed: misma partida => misma
-        # personalidad, también al recargar un savegame.
+        # personalidad, también al recargar un savegame. En red no hay AI.
         personalities = list(load_ai_personalities())
-        self.ais = [
-            AIPlayer(
-                p.id,
-                p.ai_level or ai_level,
-                personality=choose_personality(game.seed, p.id, personalities),
-            )
-            for p in game.players
-            if p.is_ai
-        ]
+        self.ais = (
+            []
+            if net is not None
+            else [
+                AIPlayer(
+                    p.id,
+                    p.ai_level or ai_level,
+                    personality=choose_personality(game.seed, p.id, personalities),
+                )
+                for p in game.players
+                if p.is_ai
+            ]
+        )
+        # Órdenes de reorganización (fusión/transferencia/división) que el
+        # humano encola en modo red: no se aplican al instante (rompería el
+        # lockstep), van con las órdenes del turno y se aplican al resolverlo.
+        self.pending_reorg: list[Order] = []
+        self._net_disconnect_shown = False
+        self._net_desync_shown = False
         self.selected_id: int | None = None
         self.selected_fort: Coord | None = None
         self.pending_paths: dict[int, list[Coord]] = {}
@@ -137,6 +162,11 @@ class GameScreen:
         return self.animation is not None and not self.animation.finished(
             self._animation_elapsed()
         )
+
+    @property
+    def waiting_peer(self) -> bool:
+        """En red: las órdenes locales ya se enviaron y falta el rival."""
+        return self.net is not None and self.net.waiting
 
     def _animation_elapsed(self) -> float:
         return (pygame.time.get_ticks() - self.animation_start) / 1000.0
@@ -213,6 +243,8 @@ class GameScreen:
             ):
                 self.animation.skip()
             return
+        if self.waiting_peer:
+            return  # órdenes enviadas: no se editan ni se reenvían hasta el rival
         if self.game_over:
             return
         if event.type == pygame.KEYDOWN and event.key in (
@@ -348,6 +380,17 @@ class GameScreen:
         amounts = {c: n for c, n in self.merge_picker.amounts.items() if n > 0}
         self.pending_merge = None
         self.merge_picker = None
+        if not amounts:
+            self._notify("No se pudo fusionar")
+            return
+        if self.net is not None:
+            # En red la reorganización es diferida: viaja como orden y se aplica
+            # al resolver el turno (igual que la AI), para no romper el lockstep.
+            self.pending_reorg.append(
+                TransferTroopsOrder(source_id, target_id, tuple(amounts.items()))
+            )
+            self._notify("Fusión encolada (se aplica al fin del turno)")
+            return
         if self.game.transfer_troops(source_id, target_id, amounts):
             self.selected_id = target_id  # el destino queda seleccionado
             if self.game.army_by_id(source_id) is None:
@@ -385,6 +428,14 @@ class GameScreen:
         amounts = {c: n for c, n in self.split_picker.amounts.items() if n > 0}
         self.pending_split = None
         self.split_picker = None
+        if not amounts:
+            return
+        if self.net is not None:
+            self.pending_reorg.append(
+                SplitArmyOrder(army_id, tuple(amounts.items()))
+            )
+            self._notify("División encolada (se aplica al fin del turno)")
+            return
         created = self.game.split_army(army_id, amounts)
         if created is None:
             self._notify("No se pudo dividir: no hay tile libre aledaño")
@@ -419,6 +470,9 @@ class GameScreen:
 
     def save(self) -> None:
         """Guarda la partida con timestamp y muestra un aviso unos segundos."""
+        if self.net is not None:
+            self._notify("No se puede guardar una partida en red")
+            return
         path = save_game(self.game)
         self._notify(f"Partida guardada: {path.name}")
 
@@ -429,13 +483,9 @@ class GameScreen:
 
     # --- turno ---------------------------------------------------------------
 
-    def end_turn(self) -> None:
-        self.animation = None  # descarta una animación anterior si la hubiera
-        self.pending_merge = None
-        self.merge_picker = None
-        self.pending_split = None
-        self.split_picker = None
-        self.spawn_highlights = []  # con el juego en marcha ya no hace falta
+    def _local_orders(self) -> list[Order]:
+        """Órdenes del jugador humano para este turno (paths, creaciones y la
+        reorganización encolada en modo red)."""
         orders: list[Order] = [
             CreateArmyOrder(position=pos) for pos in self.pending_creations
         ]
@@ -444,6 +494,20 @@ class GameScreen:
             for army_id, path in self.pending_paths.items()
             if path
         ]
+        orders += self.pending_reorg
+        return orders
+
+    def end_turn(self) -> None:
+        self.animation = None  # descarta una animación anterior si la hubiera
+        self.pending_merge = None
+        self.merge_picker = None
+        self.pending_split = None
+        self.split_picker = None
+        self.spawn_highlights = []  # con el juego en marcha ya no hace falta
+        if self.net is not None:
+            self._end_turn_net()
+            return
+        orders = self._local_orders()
         for ai in self.ais:
             orders.extend(ai.decide_orders(self.game))
         # Snapshot pre-turno: conserva sprite/posición de los que mueran.
@@ -455,6 +519,38 @@ class GameScreen:
         self.pending_creations.clear()
         self.selected_id = None
         self.selected_fort = None
+
+    def _end_turn_net(self) -> None:
+        """Modo red: envía las órdenes locales y espera al rival; el turno se
+        ejecuta en `update()` cuando llegan las dos listas."""
+        self.net.submit_local_orders(self._local_orders())
+        self.pending_paths.clear()
+        self.pending_creations.clear()
+        self.pending_reorg = []
+        self.selected_id = None
+        self.selected_fort = None
+        # Aviso persistente mientras se espera (lo limpia update() al resolver).
+        self.notice = "Esperando al rival…"
+        self.notice_until = pygame.time.get_ticks() + 10**9
+
+    def update(self) -> None:
+        """Una vez por frame (la llama el loop de la app). Sin red, no hace
+        nada; en red conduce el lockstep y dispara la animación de cada turno."""
+        if self.net is None:
+            return
+        self.net.update()
+        resolved = self.net.consume_resolved()
+        if resolved is not None:
+            self.result, pre_turn = resolved
+            self.animation = build_turn_animation(self.game, pre_turn)
+            self.animation_start = pygame.time.get_ticks()
+            self.notice = None  # se acabó la espera
+        if self.net.disconnected and not self._net_disconnect_shown:
+            self._net_disconnect_shown = True
+            self._notify(f"Rival desconectado: {self.net.disconnect_reason}")
+        if self.net.desync and not self._net_desync_shown:
+            self._net_desync_shown = True
+            self._notify("¡Desincronización detectada! (resync en MP6)")
 
     # --- dibujo ----------------------------------------------------------------
 

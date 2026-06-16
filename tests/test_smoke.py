@@ -43,7 +43,10 @@ def test_core_does_not_import_pygame():
     code = (
         "import sys; "
         "import wom.core.game, wom.core.battle, wom.core.mapgen, "
-        "wom.ai.ai_player, wom.headless; "
+        "wom.ai.ai_player, wom.headless, "
+        "wom.net.protocol, wom.net.orders_codec, wom.net.state_hash, "
+        "wom.net.transport, wom.net.session, wom.net.config_fingerprint, "
+        "wom.net.lockstep, wom.net.rules; "
         "sys.exit(1 if 'pygame' in sys.modules else 0)"
     )
     result = subprocess.run(

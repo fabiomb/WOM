@@ -7,7 +7,12 @@ import pytest
 from wom.core.army import Army
 from wom.core.config import load_game_config, load_unit_classes
 from wom.core.game import Game, Player
-from wom.core.orders import CreateArmyOrder, MoveOrder
+from wom.core.orders import (
+    CreateArmyOrder,
+    MoveOrder,
+    SplitArmyOrder,
+    TransferTroopsOrder,
+)
 from wom.core.victory import VictoryMode
 from wom.core.worldmap import Fort, Terrain, Town, WorldMap
 
@@ -71,6 +76,28 @@ def test_no_hay_retirada_dentro_de_un_fuerte():
     assert defender.position == (3, 1)  # perdió pero mantiene el fuerte
     assert defender.id not in game.last_retreats
     assert fort.owner == 1  # el atacante no pudo entrar a capturar
+
+
+def test_transfer_troops_order_se_aplica_en_el_turno():
+    """La reorganización diferida del humano en red: TransferTroopsOrder mueve
+    tropas entre dos ejércitos aledaños en la fase de órdenes."""
+    game = _make_game()
+    a = game.spawn_army(0, (2, 1), {"soldado": 20})
+    b = game.spawn_army(0, (2, 2), {"soldado": 10})  # aledaño
+    game.run_turn(
+        [TransferTroopsOrder(a.id, b.id, (("soldado", 5),))]
+    )
+    assert a.composition["soldado"] == 15
+    assert b.composition["soldado"] == 15
+
+
+def test_split_army_order_se_aplica_en_el_turno():
+    game = _make_game()
+    army = game.spawn_army(0, (2, 2), {"soldado": 12})
+    game.run_turn([SplitArmyOrder(army.id, (("soldado", 4),))])
+    assert army.composition["soldado"] == 8
+    created = next(a for a in game.armies_of(0) if a.id != army.id)
+    assert created.composition == {"soldado": 4}
 
 
 def test_trabado_por_lados_opuestos_no_escapa():

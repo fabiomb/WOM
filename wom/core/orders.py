@@ -58,4 +58,27 @@ class SplitArmyOrder:
     composition: tuple[tuple[str, int], ...]
 
 
-Order = MoveOrder | CreateArmyOrder | MergeArmyOrder | SplitArmyOrder
+@dataclass(frozen=True)
+class TransferTroopsOrder:
+    """Transfiere `composition` de `source` a `target` (versión "orden" de
+    `Game.transfer_troops`). Generaliza `MergeArmyOrder` a una transferencia
+    parcial. La usa el **humano en red**: ahí la reorganización no puede ser
+    inmediata (rompería el lockstep), así que la fusión/transferencia del modal
+    viaja como orden y se aplica en la fase de órdenes, como las de la AI.
+
+    `composition` es una tupla de pares (clase, cantidad) — inmutable y
+    hasheable como las demás órdenes.
+    """
+
+    source_id: int
+    target_id: int
+    composition: tuple[tuple[str, int], ...]
+
+
+Order = (
+    MoveOrder
+    | CreateArmyOrder
+    | MergeArmyOrder
+    | SplitArmyOrder
+    | TransferTroopsOrder
+)

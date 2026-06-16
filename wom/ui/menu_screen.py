@@ -151,6 +151,8 @@ class MenuScreen:
         if self.mode == "main":
             if hit == "new":
                 self.mode = "new"
+            elif hit == "multiplayer":
+                self.action = "multiplayer"
             elif hit == "load":
                 self._saves = [save_info(p) | {"path": p} for p in list_saves()[:MAX_SAVES_SHOWN]]
                 self.mode = "load"
@@ -278,6 +280,7 @@ class MenuScreen:
     def _draw_main(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         rows = (
             ("new", "Nueva partida"),
+            ("multiplayer", "Multijugador"),
             ("load", "Cargar partida"),
             ("options", "Opciones"),
             ("quit", "Salir"),

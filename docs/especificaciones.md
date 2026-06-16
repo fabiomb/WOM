@@ -233,24 +233,52 @@ Mejoras sobre el motor de scoring de objetivos para que la AI gestione mejor sus
 * El `ai.json` pasó a tener dos secciones (`niveles` y `personalidades`); el cargador (`load_ai_config` / `load_ai_personalities`) es retrocompatible con el formato anterior. El balance se revalidó con `tools/simulate.py` manteniendo difícil > medio > fácil.
 
 
-## 11. Fase 2
+## 11. Fase 2 — Multiplayer (v0.4.0)
+
+El diseño completo vive en [`docs/multiplayer.md`](multiplayer.md).
+
+### Diseño de multiplayer
+
+* **Metodología elegida: lockstep determinista con host autoritativo de
+  respaldo.** Ambos clientes corren la misma simulación (`Game.run_turn`) con
+  las mismas órdenes y la misma seed; por la red solo viajan las órdenes de cada
+  jugador por turno (+ seed y reglas al inicio). Se aprovecha que el core ya es
+  determinista (RNG con seed, savegame reproducible). Un hash de estado por
+  turno verifica la sincronía; ante divergencia, el host reenvía el estado
+  completo (`STATE_SYNC`). Detalle, alternativas descartadas y garantías de
+  determinismo en `docs/multiplayer.md` §2–3.
+* Nuevo paquete `wom/net/` (TCP de stdlib, sin pygame, se suma al test de humo).
+  Sin dependencias externas nuevas.
+
+### Desarrollar multiplayer
+
+* Definir reglas, el jugador que crea la partida define las reglas: 
+	* reglas de victoria
+	* turnos máximos (si se alcanza el máximo se calcula una condición de victoria o empate)
+	* tiempo para turno (infinito o x segundos a definir el máximo de tiempo hasta que se le pasa el turno al otro jugador)
+* Agregar nombre de jugador al crear partida
+* Agregar nombre de jugador al conectarse (cliente)
+* Agregar chat entre jugadores en el sidebar
+* Agregar en el menú opción "Multijugador" que abre pantalla de configuración
+	* Dentro opción conectarse a una partida o crear una partida
+	* Al elegir opción de conectarse: ingresar IP y puerto
+	* Al elegir opción de crear partida, pantalla de reglas y activar para esperar conexiones
+* Al esperar las conexiones mostrar el estado, si entra un jugador o no y cuando se conecta avisarle al host
+* una vez ambos jugadores se conectan mostrar un diálogo que le pregunte a ambos si están listos para la partida, si dan el OK ambos comienza
+* El host puede dar de baja la partida en cualquier momento, si quiere salir un diálogo le debe avisar que desconectará al jugador externo
+
+## 12 Escenarios
 
 ### Escenarios predefinidos
 
 Sección con mapas predefinidos para poder jugar escenarios, tropas y mapa ya dibujado y organizado representando batallas de fantasía o históricas.
 
+* Editor de mapas (con botón de generación automática)
+* Editor de ejércitos (permite ubicar tropas para el escenario predefinido)
+* Configuración de condiciones de victoria
+* Texto descriptivo de la batalla representada
+* Imagen descriptiva de la batalla representada
 
-### Multijugador
-
-* Opción en el menú de creación de partida para abrir a otros usuarios
-* Elegir un puerto poco usado
-* Definir timeout para turno (todo el tiempo, 10 segundos, 30 segundos), si no envía el turno, se ejecuta automático
-* Definir nombre del jugador
-* Crear entorno de conexión
-* Un jugador es host y el otro se conecta a ese IP por el puerto
-
-### Zoom en batalla
+## 13 Zoom en batalla
 
 Dos escenarios posibles: contra un castillo, en terreno abierto
-
-### 

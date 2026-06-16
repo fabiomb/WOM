@@ -45,7 +45,13 @@ from wom.core.battle import (
 )
 from wom.core.config import UnitClass, load_game_config, load_unit_classes
 from wom.core.mapgen import MapParams, generate_map
-from wom.core.orders import CreateArmyOrder, MergeArmyOrder, Order, SplitArmyOrder
+from wom.core.orders import (
+    CreateArmyOrder,
+    MergeArmyOrder,
+    Order,
+    SplitArmyOrder,
+    TransferTroopsOrder,
+)
 from wom.core.victory import VictoryMode, VictoryResult, check_victory
 from wom.core.worldmap import Coord, Fort, WorldMap
 
@@ -175,6 +181,10 @@ class Game:
                 self.merge_armies(order.source_id, order.target_id)
             elif isinstance(order, SplitArmyOrder):
                 self.split_army(order.source_id, dict(order.composition))
+            elif isinstance(order, TransferTroopsOrder):
+                self.transfer_troops(
+                    order.source_id, order.target_id, dict(order.composition)
+                )
             else:
                 moves.append(order)
         for order in moves:
