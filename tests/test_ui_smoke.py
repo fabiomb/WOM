@@ -593,3 +593,120 @@ def test_partida_completa_desde_la_ui(screen, game_screen):
             break
     assert game_screen.game_over  # modo TIME: termina a más tardar en el límite
     game_screen.draw(screen)  # overlay de fin de partida no debe romper
+
+
+# --- editor y nuevos flujos del menú --------------------------------------
+
+
+def test_menu_abre_editor(screen):
+    from wom.ui.menu_screen import MenuScreen
+
+    menu = MenuScreen()
+    menu.draw(screen)
+    _click_menu(menu, "editor")
+    assert menu.take_action() == "editor"
+
+
+def test_menu_origen_archivo_y_pick_map(screen, tmp_path, monkeypatch):
+    import wom.persistence.scenario as scenario
+    from wom.core.game import Player
+    from wom.core.worldmap import Fort, Terrain, WorldMap
+    from wom.ui.menu_screen import MenuScreen, NewGameChoice
+
+    world = WorldMap(width=12, height=10, tiles=[[Terrain.PLAINS] * 12 for _ in range(10)])
+    world.forts = [Fort((1, 1), owner=0), Fort((10, 8), owner=1)]
+    doc = scenario.ScenarioDoc(
+        world=world,
+        players=[Player(0, "J"), Player(1, "R", is_ai=True, ai_level="medio")],
+        army_specs=[{"owner": 0, "position": [1, 1], "composition": {"soldado": 5}}],
+    )
+    scenario.save_scenario(doc, name="mimapa", directory=tmp_path)
+    monkeypatch.setattr(scenario, "MAPS_DIR", tmp_path)
+    monkeypatch.setattr(scenario, "BUNDLED_SCENARIOS_DIR", tmp_path / "no_existe")
+
+    menu = MenuScreen()
+    menu.draw(screen)
+    _click_menu(menu, "new")
+    menu.draw(screen)
+    _click_menu(menu, "map_source")  # aleatorio → archivo
+    assert menu.map_source == "archivo"
+    menu.draw(screen)
+    _click_menu(menu, "pick_file")
+    assert menu.mode == "pick_map"
+    menu.draw(screen)
+    _click_menu(menu, next(b for b in menu._buttons if b.startswith("map:")))
+    assert menu.loaded_map_path is not None and menu.mode == "new"
+    menu.draw(screen)
+    _click_menu(menu, "start")
+    action = menu.take_action()
+    assert isinstance(action, NewGameChoice) and action.map_path is not None
+
+
+def test_menu_escenarios_intro_y_jugar(screen, tmp_path, monkeypatch):
+    import wom.persistence.scenario as scenario
+    from wom.core.game import Player
+    from wom.core.victory import VictoryMode
+    from wom.core.worldmap import Fort, Terrain, WorldMap
+    from wom.ui.menu_screen import MenuScreen, ScenarioChoice
+
+    world = WorldMap(width=12, height=10, tiles=[[Terrain.PLAINS] * 12 for _ in range(10)])
+    world.forts = [Fort((1, 1), owner=0), Fort((10, 8), owner=1)]
+    doc = scenario.ScenarioDoc(
+        world=world,
+        players=[Player(0, "J"), Player(1, "R", is_ai=True, ai_level="dificil")],
+        army_specs=[],
+        title="El asedio",
+        description="Defendé el fuerte del norte a toda costa.",
+        victory_mode=VictoryMode.FLAGS,
+        ai_level="dificil",
+    )
+    scenario.save_scenario(doc, name="asedio", directory=tmp_path)
+    monkeypatch.setattr(scenario, "MAPS_DIR", tmp_path)
+    monkeypatch.setattr(scenario, "BUNDLED_SCENARIOS_DIR", tmp_path / "no_existe")
+
+    menu = MenuScreen()
+    menu.draw(screen)
+    _click_menu(menu, "scenarios")
+    assert menu.mode == "scenarios"
+    menu.draw(screen)
+    _click_menu(menu, next(b for b in menu._buttons if b.startswith("scn:")))
+    assert menu.mode == "scenario_intro"
+    menu.draw(screen)  # título + descripción sin romper
+    _click_menu(menu, "play")
+    action = menu.take_action()
+    assert isinstance(action, ScenarioChoice)
+
+
+def test_editor_dibuja_y_pinta(screen):
+    from wom.core.worldmap import Terrain
+    from wom.ui.editor_screen import EditorScreen
+
+    editor = EditorScreen(size="chico")
+    editor.draw(screen)
+    # elegir el pincel de montaña desde la paleta y pintar un tile del mapa
+    editor.draw(screen)
+    mountain_btn = editor._buttons[f"tool:terrain:{Terrain.MOUNTAIN.value}"]
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": mountain_btn.center, "button": 1})
+    )
+    assert editor.tool == f"terrain:{Terrain.MOUNTAIN.value}"
+    tile_point = editor.renderer.tile_center((3, 3))
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": tile_point, "button": 1})
+    )
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONUP, {"pos": tile_point, "button": 1})
+    )
+    assert editor.game.world.tiles[3][3] is Terrain.MOUNTAIN
+    editor.draw(screen)
+
+
+def test_editor_esc_pide_confirmacion(screen):
+    from wom.ui.editor_screen import EditorScreen
+
+    editor = EditorScreen(size="chico")
+    editor.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE}))
+    assert editor._confirm is not None and not editor.wants_menu
+    editor.draw(screen)
+    editor.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_s}))
+    assert editor.wants_menu

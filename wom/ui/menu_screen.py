@@ -14,6 +14,7 @@ que le pasa la app; cada cambio se aplica y persiste al instante
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from wom import __version__
 from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
 from wom.persistence.savegame import list_saves, save_info
+from wom.persistence.scenario import list_maps, load_scenario, scenario_info
 from wom.persistence.settings import Settings
 from wom.ui import scale, theme
 from wom.ui.assets import ASSETS_DIR
@@ -69,6 +71,9 @@ class NewGameChoice:
     map_size: str
     victory_mode: VictoryMode
     seed: int | None = None
+    # Si está, la partida usa el terreno+tropas de este `.wom` ("Cargar mapa")
+    # en vez de generar uno aleatorio; el tamaño se ignora.
+    map_path: Path | None = None
 
     def map_params(self) -> MapParams:
         width, height, forts, towns = MAP_SIZES[self.map_size]
@@ -77,6 +82,13 @@ class NewGameChoice:
 
 @dataclass(frozen=True)
 class LoadChoice:
+    path: Path
+
+
+@dataclass(frozen=True)
+class ScenarioChoice:
+    """Jugar un escenario completo (honra IA y victoria del `.wom`)."""
+
     path: Path
 
 
@@ -92,11 +104,18 @@ class MenuScreen:
         self.music = music  # None en tests sin audio: Opciones queda inerte
         self._editing_folder: str | None = None  # buffer mientras se escribe
         self.mode = "main"
-        self.action: NewGameChoice | LoadChoice | str | None = None
+        self.action: NewGameChoice | LoadChoice | ScenarioChoice | str | None = None
         self.ai_level = default_ai_level if default_ai_level in AI_LEVELS else "medio"
         self.map_size = "medio"
         self.victory_mode = VictoryMode.TOTAL
         self.seed = default_seed
+        # Origen del mapa en "Nueva partida": aleatorio o un `.wom` cargado.
+        self.map_source = "aleatorio"  # "aleatorio" | "archivo"
+        self.loaded_map_path: Path | None = None
+        self._maps: list[Path] = []        # archivos para pick_map
+        self._scenarios: list[dict] = []   # info de escenarios (con título)
+        self._intro_image: pygame.Surface | None = None  # imagen del escenario
+        self._intro_info: dict | None = None  # título/descripción del intro
         self.title_font = pygame.font.SysFont(None, 72)
         self.font = pygame.font.SysFont(None, 30)
         self.small_font = pygame.font.SysFont(None, 22)
@@ -107,10 +126,31 @@ class MenuScreen:
         self._scaled_bg: pygame.Surface | None = None  # cache al tamaño de ventana
         self._on_scroll = False  # True si se está dibujando sobre el pergamino
 
-    def take_action(self) -> NewGameChoice | LoadChoice | str | None:
+    def take_action(self) -> NewGameChoice | LoadChoice | ScenarioChoice | str | None:
         """Devuelve y consume la decisión del usuario (la lee el loop de app)."""
         action, self.action = self.action, None
         return action
+
+    def _open_scenario_intro(self, path: Path) -> None:
+        """Carga el `.wom` y prepara la pantalla de intro (texto + imagen)."""
+        try:
+            doc = load_scenario(path)
+        except (OSError, ValueError, KeyError):
+            return
+        self._intro_info = {
+            "path": path,
+            "title": doc.title,
+            "description": doc.description,
+            "victory_mode": doc.victory_mode,
+            "ai_level": doc.ai_level,
+        }
+        self._intro_image = None
+        if doc.image_bytes:
+            try:
+                self._intro_image = pygame.image.load(io.BytesIO(doc.image_bytes))
+            except (pygame.error, OSError):
+                self._intro_image = None
+        self.mode = "scenario_intro"
 
     @property
     def capturing_text(self) -> bool:
@@ -127,6 +167,10 @@ class MenuScreen:
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             if self.mode in ("sound", "video"):
                 self.mode = "options"  # un nivel atrás: al hub de opciones
+            elif self.mode == "scenario_intro":
+                self.mode = "scenarios"
+            elif self.mode == "pick_map":
+                self.mode = "new"
             elif self.mode == "main":
                 self.action = "quit"
             else:
@@ -157,6 +201,14 @@ class MenuScreen:
         if self.mode == "main":
             if hit == "new":
                 self.mode = "new"
+            elif hit == "scenarios":
+                self._scenarios = [
+                    info for p in list_maps()
+                    if (info := _scenario_info_safe(p)) is not None and info["title"].strip()
+                ]
+                self.mode = "scenarios"
+            elif hit == "editor":
+                self.action = "editor"
             elif hit == "multiplayer":
                 self.action = "multiplayer"
             elif hit == "load":
@@ -173,12 +225,35 @@ class MenuScreen:
                 self.map_size = _next(list(MAP_SIZES), self.map_size)
             elif hit == "victory":
                 self.victory_mode = _next(VICTORY_MODES, self.victory_mode)
+            elif hit == "map_source":
+                self.map_source = "archivo" if self.map_source == "aleatorio" else "aleatorio"
+            elif hit == "pick_file":
+                self._maps = list_maps()
+                self.mode = "pick_map"
             elif hit == "start":
                 self.action = NewGameChoice(
-                    self.ai_level, self.map_size, self.victory_mode, self.seed
+                    self.ai_level, self.map_size, self.victory_mode, self.seed,
+                    map_path=self.loaded_map_path if self.map_source == "archivo" else None,
                 )
             elif hit == "back":
                 self.mode = "main"
+        elif self.mode == "pick_map":
+            if hit == "back":
+                self.mode = "new"
+            elif hit.startswith("map:"):
+                self.loaded_map_path = Path(hit[len("map:"):])
+                self.map_source = "archivo"
+                self.mode = "new"
+        elif self.mode == "scenarios":
+            if hit == "back":
+                self.mode = "main"
+            elif hit.startswith("scn:"):
+                self._open_scenario_intro(Path(hit[len("scn:"):]))
+        elif self.mode == "scenario_intro":
+            if hit == "play" and self._intro_info is not None:
+                self.action = ScenarioChoice(self._intro_info["path"])
+            elif hit == "back":
+                self.mode = "scenarios"
         elif self.mode == "load":
             if hit == "back":
                 self.mode = "main"
@@ -270,6 +345,12 @@ class MenuScreen:
             self._draw_sound(surface, area)
         elif self.mode == "video":
             self._draw_video(surface, area)
+        elif self.mode == "scenarios":
+            self._draw_scenarios(surface, area)
+        elif self.mode == "scenario_intro":
+            self._draw_scenario_intro(surface, area)
+        elif self.mode == "pick_map":
+            self._draw_pick_map(surface, area)
         else:
             self._draw_load(surface, area)
 
@@ -286,6 +367,8 @@ class MenuScreen:
     def _draw_main(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         rows = (
             ("new", "Nueva partida"),
+            ("scenarios", "Escenarios"),
+            ("editor", "Editor de mapas"),
             ("multiplayer", "Multijugador"),
             ("load", "Cargar partida"),
             ("options", "Opciones"),
@@ -299,9 +382,15 @@ class MenuScreen:
     def _draw_new(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         y = area.y + 6
         width, height, forts, towns = MAP_SIZES[self.map_size]
+        if self.map_source == "archivo":
+            name = self.loaded_map_path.stem if self.loaded_map_path else "(elegir)"
+            map_row = ("pick_file", f"Archivo:  {name}")
+        else:
+            map_row = ("map_size", f"Mapa:  {self.map_size} ({width}x{height})")
         options = (
             ("ai_level", f"Nivel de la AI:  {self.ai_level}"),
-            ("map_size", f"Mapa:  {self.map_size} ({width}x{height})"),
+            ("map_source", f"Origen del mapa:  {self.map_source}"),
+            map_row,
             ("victory", f"Victoria:  {VICTORY_LABELS[self.victory_mode]}"),
         )
         for bid, label in options:
@@ -310,8 +399,84 @@ class MenuScreen:
         hint = self.small_font.render("(click para cambiar cada opción)", True, hint_color)
         surface.blit(hint, hint.get_rect(center=(area.centerx, y + 6)))
         y += 30
-        y = self._button(surface, "start", "Comenzar", area, y)
+        can_start = self.map_source == "aleatorio" or self.loaded_map_path is not None
+        if can_start:
+            y = self._button(surface, "start", "Comenzar", area, y)
+        else:
+            warn = self.small_font.render(
+                "Elegí un archivo para comenzar", True, INK_HOVER if self._on_scroll else theme.TEXT_DIM
+            )
+            surface.blit(warn, warn.get_rect(center=(area.centerx, y + 18)))
+            y += 42
         self._button(surface, "back", "Volver (ESC)", area, y, option_style=True)
+
+    def _draw_scenarios(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        y = area.y + 4
+        if not self._scenarios:
+            color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+            label = self.font.render("No hay escenarios", True, color)
+            surface.blit(label, label.get_rect(center=(area.centerx, y + 20)))
+            y += 60
+        row_height = (34 if self._on_scroll else 40) + 8
+        max_rows = max(1, (area.height - BUTTON_SIZE[1] - 20) // row_height)
+        for info in self._scenarios[:max_rows]:
+            y = self._button(
+                surface, f"scn:{info['path']}", info["title"], area, y, option_style=True
+            )
+        self._button(surface, "back", "Volver (ESC)", area, y + 8)
+
+    def _draw_pick_map(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        y = area.y + 4
+        if not self._maps:
+            color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+            label = self.font.render("No hay mapas en maps/", True, color)
+            surface.blit(label, label.get_rect(center=(area.centerx, y + 20)))
+            y += 60
+        row_height = (34 if self._on_scroll else 40) + 8
+        max_rows = max(1, (area.height - BUTTON_SIZE[1] - 20) // row_height)
+        for path in self._maps[:max_rows]:
+            y = self._button(surface, f"map:{path}", path.stem, area, y, option_style=True)
+        self._button(surface, "back", "Volver (ESC)", area, y + 8)
+
+    def _draw_scenario_intro(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        info = self._intro_info or {}
+        y = area.y + 6
+        title = self.font.render(info.get("title", ""), True, INK if self._on_scroll else theme.TEXT)
+        surface.blit(title, title.get_rect(midtop=(area.centerx, y)))
+        y += 44
+        if self._intro_image is not None:
+            max_w, max_h = area.width - 16, area.height // 3
+            img = self._intro_image
+            scale_f = min(max_w / img.get_width(), max_h / img.get_height(), 1.0)
+            scaled = pygame.transform.smoothscale(
+                img, (round(img.get_width() * scale_f), round(img.get_height() * scale_f))
+            )
+            surface.blit(scaled, scaled.get_rect(midtop=(area.centerx, y)))
+            y += scaled.get_height() + 12
+        y = self._wrap_text(surface, info.get("description", ""), area, y)
+        y += 10
+        y = self._button(surface, "play", "Jugar", area, y)
+        self._button(surface, "back", "Volver (ESC)", area, y, option_style=True)
+
+    def _wrap_text(self, surface: pygame.Surface, text: str, area: pygame.Rect, y: int) -> int:
+        """Dibuja `text` ajustado al ancho del área; devuelve el y siguiente."""
+        color = INK if self._on_scroll else theme.TEXT_DIM
+        words = text.split()
+        line = ""
+        for word in words:
+            probe = f"{line} {word}".strip()
+            if self.small_font.size(probe)[0] > area.width - 16 and line:
+                rendered = self.small_font.render(line, True, color)
+                surface.blit(rendered, rendered.get_rect(midtop=(area.centerx, y)))
+                y += 24
+                line = word
+            else:
+                line = probe
+        if line:
+            rendered = self.small_font.render(line, True, color)
+            surface.blit(rendered, rendered.get_rect(midtop=(area.centerx, y)))
+            y += 24
+        return y
 
     def _draw_options(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         """Hub de opciones: elegir la categoría a configurar."""
@@ -427,3 +592,11 @@ class MenuScreen:
 def _next(values: list, current) -> object:
     """Valor siguiente de la lista, cíclico."""
     return values[(values.index(current) + 1) % len(values)]
+
+
+def _scenario_info_safe(path: Path) -> dict | None:
+    """scenario_info tolerante: descarta archivos `.wom` corruptos o ajenos."""
+    try:
+        return scenario_info(path)
+    except (OSError, ValueError, KeyError):
+        return None

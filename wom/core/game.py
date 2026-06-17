@@ -149,6 +149,48 @@ class Game:
         game._spawn_initial_armies()
         return game
 
+    @classmethod
+    def from_setup(
+        cls,
+        world: WorldMap,
+        players: list[Player],
+        army_specs: list[dict],
+        victory_mode: VictoryMode = VictoryMode.TOTAL,
+        seed: int | None = None,
+    ) -> "Game":
+        """Crea una partida nueva (turno 0) a partir de un mapa ya armado.
+
+        Lo usan los escenarios y los mapas del editor: el mundo, los sitios y
+        las tropas vienen dados (no se generan al azar). Cada `army_specs` es
+        un dict con `owner`, `position` y `composition` (y `xp`/`food`
+        opcionales); a cada ejército se le asigna un id fresco. El RNG arranca
+        sembrado (seed aleatoria si no se da una) como cualquier partida nueva.
+        """
+        seed = seed if seed is not None else random.randrange(2**32)
+        rng = random.Random(seed)
+        game = cls(
+            world=world,
+            players=players,
+            armies=[],
+            classes=load_unit_classes(),
+            config=load_game_config(),
+            victory_mode=victory_mode,
+            rng=rng,
+            seed=seed,
+        )
+        for player in game.players:
+            player.food = game.config["comida_inicial"]
+        for spec in army_specs:
+            composition = {c: n for c, n in dict(spec["composition"]).items() if n > 0}
+            if not composition:
+                continue
+            army = game.spawn_army(spec["owner"], tuple(spec["position"]), composition)
+            if "xp" in spec:
+                army.xp = spec["xp"]
+            if "food" in spec:
+                army.food = spec["food"]
+        return game
+
     # --- fases del turno -------------------------------------------------
 
     def run_turn(self, orders: list[Order]) -> VictoryResult:

@@ -33,7 +33,18 @@ class MapRenderer:
         self._assets_by_size: dict[int, Assets] = {assets.tile_size: assets}
         self._fonts_by_size: dict[int, pygame.font.Font] = {}
         # El terreno no cambia durante la partida: la variante de costa de
-        # cada tile de agua se calcula una sola vez.
+        # cada tile de agua se calcula una sola vez (el editor la recalcula a
+        # mano con refresh_terrain cuando pinta).
+        self._world = world
+        self.refresh_terrain()
+
+    def refresh_terrain(self) -> None:
+        """Recalcula la variante de costa de cada tile de agua (autotiling).
+
+        En la partida el terreno es fijo y esto corre una vez; el editor lo
+        invoca tras cada pincelada para que la costa se re-autotile en vivo.
+        """
+        world = self._world
         self._water_tiles = {
             (x, y): water_tile(world, (x, y))
             for y in range(world.height)

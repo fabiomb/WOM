@@ -15,10 +15,17 @@ from wom.core.game import Game, Player
 from wom.core.victory import VictoryMode
 from wom.net.lockstep import NetGame
 from wom.persistence.savegame import load_game
+from wom.persistence.scenario import build_game, load_scenario
 from wom.persistence.settings import load_settings
 from wom.ui import scale, theme
+from wom.ui.editor_screen import EditorScreen
 from wom.ui.game_screen import GameScreen
-from wom.ui.menu_screen import LoadChoice, MenuScreen, NewGameChoice
+from wom.ui.menu_screen import (
+    LoadChoice,
+    MenuScreen,
+    NewGameChoice,
+    ScenarioChoice,
+)
 from wom.ui.multiplayer_screen import MultiplayerScreen
 from wom.ui.music import MusicPlayer
 from wom.ui.music_overlay import MusicOverlay
@@ -45,12 +52,27 @@ def _event_to_overlay(current, overlay, event) -> bool:
 
 
 def new_game(choice: NewGameChoice) -> Game:
-    """Crea una partida humano vs AI según lo elegido en el menú."""
+    """Crea una partida humano vs AI según lo elegido en el menú.
+
+    Con `map_path` ("Cargar mapa") se usa el terreno+tropas de un `.wom` y el
+    menú impone jugadores y victoria; si no, se genera un mapa aleatorio.
+    """
     players = [
         Player(HUMAN_ID, "Jugador"),
         Player(1, f"AI ({choice.ai_level})", is_ai=True, ai_level=choice.ai_level),
     ]
+    if choice.map_path is not None:
+        return build_game(
+            load_scenario(choice.map_path),
+            players=players,
+            victory_mode=choice.victory_mode,
+        )
     return Game.new(choice.map_params(), players, choice.victory_mode)
+
+
+def scenario_game(choice: ScenarioChoice) -> Game:
+    """Arranca un escenario completo: honra la IA y la victoria del `.wom`."""
+    return build_game(load_scenario(choice.path))
 
 
 def _start_net_game(net_start) -> GameScreen:
@@ -118,8 +140,12 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
                 running = False
             elif action == "multiplayer":
                 current = MultiplayerScreen()
+            elif action == "editor":
+                current = EditorScreen()
             elif isinstance(action, NewGameChoice):
                 current = GameScreen(new_game(action), human_id=HUMAN_ID)
+            elif isinstance(action, ScenarioChoice):
+                current = GameScreen(scenario_game(action), human_id=HUMAN_ID)
             elif isinstance(action, LoadChoice):
                 current = GameScreen(load_game(action.path), human_id=HUMAN_ID)
         elif isinstance(current, MultiplayerScreen):
@@ -127,6 +153,9 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
             if current.net_start is not None:
                 current = _start_net_game(current.net_start)
             elif current.wants_menu:
+                current = MenuScreen(ai_level, seed, music=music)
+        elif isinstance(current, EditorScreen):
+            if current.wants_menu:
                 current = MenuScreen(ai_level, seed, music=music)
         else:  # GameScreen
             current.update()  # conduce el lockstep en red (no-op sin red)
