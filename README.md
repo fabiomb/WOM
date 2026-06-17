@@ -26,6 +26,9 @@ producen tropas, pueblos que dan comida y batallas autoresueltas. Hecho en
   turnos.
 - **Multijugador humano vs humano por red local** (LAN), con chat en partida
   (ver más abajo).
+- **Jugador LLM**: un modelo de lenguaje (local con Ollama/LM Studio, u online
+  con Gemini, Claude o ChatGPT) puede jugar como rival, conectándose a la
+  partida como un cliente de red más (ver más abajo).
 - **Reorganización de ejércitos**: fusionar dos ejércitos aledaños o dividir
   uno en dos, con un modal por clase de tropa.
 - **Movimiento animado** en tres fases (marcha → choque → retirada), menú
@@ -51,6 +54,38 @@ turno sobre las mismas órdenes y seed, así que solo viajan las órdenes por la
 red (el host es la autoridad y resincroniza ante cualquier divergencia). El
 panel lateral muestra el chat, el estado de la conexión y el reloj de turno
 (opcional). Si un jugador sale al menú, el rival es avisado al instante.
+
+## Jugador LLM (modelo de lenguaje como rival)
+
+Un **LLM puede ocupar el lugar de un jugador**: observa el tablero, planifica,
+crea y mueve ejércitos, reorganiza y pasa el turno. Se conecta a una partida
+**como un cliente de red más** (no es un servidor MCP), así que aprovecha todo el
+lockstep determinista del modo multijugador — el LLM solo decide las órdenes; la
+simulación la siguen corriendo igual ambos lados.
+
+Sirve para **probar qué modelo juega mejor** un juego de estrategia: corre con
+modelos **locales** (Ollama, LM Studio) u **online** (Gemini, Claude, ChatGPT)
+detrás de una única interfaz, sin SDKs externos.
+
+1. Hospedá una partida desde **Multijugador → Crear** y hacé clic en
+   «Esperar conexiones» (conviene poner **tiempo por turno en infinito**: el LLM
+   tarda unos segundos por turno).
+2. Conectá el LLM como cliente (jugador 2):
+
+   ```powershell
+   # Local con Ollama (sin API key)
+   .venv\Scripts\python tools\llm_client.py --provider ollama --model gemma3 --name Gemma
+
+   # Online (la API key se toma de la variable de entorno)
+   $env:ANTHROPIC_API_KEY = "sk-ant-..."
+   .venv\Scripts\python tools\llm_client.py --provider anthropic --model claude-opus-4-8 `
+       --name Claude --thinking --effort high
+   ```
+
+El LLM recibe el tablero como un mapa ASCII + listas de unidades y responde con
+acciones de alto nivel (mover, crear, fusionar, dividir…); el módulo calcula las
+rutas con el pathfinding del core y descarta cualquier orden inválida. Diseño
+completo en [`docs/llm.md`](docs/llm.md).
 
 ## Cómo jugar
 
@@ -98,6 +133,10 @@ aleatorio/secuencial — todo queda guardado en `settings.json`.
 - [`docs/especificaciones.md`](docs/especificaciones.md) — especificación
   técnica completa: modelo de dominio, fases del turno, fórmula de batalla,
   IA, persistencia y roadmap.
+- [`docs/multiplayer.md`](docs/multiplayer.md) — diseño del modo multijugador
+  (lockstep determinista, protocolo de red, sincronización).
+- [`docs/llm.md`](docs/llm.md) — diseño del jugador LLM (observación, gramática
+  de acciones, backends y cómo correrlo).
 - [`CLAUDE.md`](CLAUDE.md) — guía de arquitectura para desarrollo (capas,
   invariantes, comandos).
 
@@ -111,6 +150,7 @@ wom/core/         lógica pura: mapa, ejércitos, turnos, batallas, victoria
 wom/ai/           jugadores IA (emiten las mismas Orders que un humano)
 wom/ui/           pygame: render, input, menú, animaciones
 wom/net/          multijugador LAN: lockstep determinista (tampoco importa pygame)
+wom/llm/          jugador LLM: observación, acciones y backends (tampoco importa pygame)
 wom/persistence/  savegames JSON en saves/
 data/config/      todo el balance en JSON (clases, batalla, IA)
 data/assets/      sprites PNG
