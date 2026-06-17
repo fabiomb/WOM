@@ -46,7 +46,9 @@ def test_core_does_not_import_pygame():
         "wom.ai.ai_player, wom.headless, "
         "wom.net.protocol, wom.net.orders_codec, wom.net.state_hash, "
         "wom.net.transport, wom.net.session, wom.net.config_fingerprint, "
-        "wom.net.lockstep, wom.net.rules; "
+        "wom.net.lockstep, wom.net.rules, "
+        "wom.llm.agent, wom.llm.actions, wom.llm.observation, "
+        "wom.llm.prompt, wom.llm.backend; "
         "sys.exit(1 if 'pygame' in sys.modules else 0)"
     )
     result = subprocess.run(
@@ -56,5 +58,5 @@ def test_core_does_not_import_pygame():
         text=True,
     )
     assert result.returncode == 0, (
-        f"wom.core/wom.ai no deben importar pygame\n{result.stderr}"
+        f"wom.core/wom.ai/wom.net/wom.llm no deben importar pygame\n{result.stderr}"
     )
