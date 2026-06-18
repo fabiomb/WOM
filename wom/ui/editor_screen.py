@@ -18,6 +18,7 @@ globales (la M del reproductor) no roben las teclas mientras se escribe.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pygame
@@ -34,7 +35,7 @@ from wom.persistence.scenario import (
     save_scenario,
     scenario_info,
 )
-from wom.ui import scale, theme
+from wom.ui import filedialog, scale, theme
 from wom.ui.assets import Assets
 from wom.ui.dialogs import TroopPicker
 from wom.ui.menu_screen import AI_LEVELS, MAP_SIZES, VICTORY_LABELS, VICTORY_MODES
@@ -85,6 +86,9 @@ class EditorScreen:
         # Modales (a lo sumo uno activo): formulario de guardado, lista de
         # carga/tamaño, selector de tropas, confirmación sí/no.
         self.save_form: SaveForm | None = None
+        # Qué hace el formulario al aceptar: "save" guarda en disco, "meta" solo
+        # actualiza la metadata en edición (título/descripción/imagen) sin guardar.
+        self._form_mode = "save"
         self.list_modal: ListModal | None = None
         self._list_kind: str | None = None
         self.army_picker: TroopPicker | None = None
@@ -145,7 +149,10 @@ class EditorScreen:
         if self.save_form is not None:
             result = self.save_form.handle_event(event)
             if result == "accept":
-                self._apply_form_and_save(self.save_form)
+                if self._form_mode == "meta":
+                    self._apply_form_meta(self.save_form)
+                else:
+                    self._apply_form_and_save(self.save_form)
                 self.save_form = None
             elif result == "cancel":
                 self.save_form = None
@@ -222,15 +229,30 @@ class EditorScreen:
                 [(key, f"{key}  ({w}x{h})") for key, (w, h, _, _) in MAP_SIZES.items()],
             )
             self._list_kind = "new"
+        elif hit == "metadata":
+            # Datos del escenario (título/descripción/victoria/IA/imagen) como
+            # parte de la edición: el formulario solo actualiza la metadata, no
+            # guarda en disco.
+            self.save_form = SaveForm(
+                self.doc_meta,
+                heading="Datos del escenario",
+                accept_label="Aplicar (Enter)",
+                image_bytes=self.doc_image,
+            )
+            self._form_mode = "meta"
         elif hit == "save":
             # Guardar: sobreescribe el archivo actual; si todavía no se guardó
             # nunca, abre el formulario (equivale a "Guardar como").
             if self.current_path is not None:
                 self._save_to(self.current_path)
             else:
-                self.save_form = SaveForm(self.doc_meta)
+                self.save_form = SaveForm(self.doc_meta, image_bytes=self.doc_image)
+                self._form_mode = "save"
         elif hit == "save_as":
-            self.save_form = SaveForm(self.doc_meta)  # siempre archivo nuevo
+            self.save_form = SaveForm(  # siempre archivo nuevo
+                self.doc_meta, image_bytes=self.doc_image
+            )
+            self._form_mode = "save"
         elif hit == "load":
             entries = [(str(p), p.stem) for p in list_maps()]
             self.list_modal = ListModal("Cargar mapa", entries, empty="No hay mapas")
@@ -408,10 +430,10 @@ class EditorScreen:
             + abs(MAP_SIZES[k][1] - world.height),
         )
 
-    def _apply_form_and_save(self, form: "SaveForm") -> None:
-        """Toma los datos del formulario en la metadata del documento y guarda
-        en un archivo nuevo (derivado del título). Lo usan el primer "Guardar"
-        y "Guardar como"."""
+    def _read_form_meta(self, form: "SaveForm") -> None:
+        """Vuelca los datos del formulario en la metadata del documento. La
+        imagen (si se indicó una ruta nueva) se lee a bytes; si no, se conserva
+        la que ya tuviera el documento."""
         self.doc_meta = {
             "title": form.fields["title"].strip(),
             "description": form.fields["description"].strip(),
@@ -423,7 +445,20 @@ class EditorScreen:
             try:
                 self.doc_image = Path(image_path).read_bytes()
             except OSError:
-                self._notify("No se pudo leer la imagen; se guarda sin ella")
+                self._notify("No se pudo leer la imagen")
+
+    def _apply_form_meta(self, form: "SaveForm") -> None:
+        """Edita la metadata del documento sin guardar (botón "Datos del
+        escenario"): título/descripción/victoria/IA/imagen se actualizan en el
+        buffer y el próximo "Guardar" los persiste."""
+        self._read_form_meta(form)
+        self._notify("Datos del escenario actualizados")
+
+    def _apply_form_and_save(self, form: "SaveForm") -> None:
+        """Toma los datos del formulario en la metadata del documento y guarda
+        en un archivo nuevo (derivado del título). Lo usan el primer "Guardar"
+        y "Guardar como"."""
+        self._read_form_meta(form)
         self._save_to(None)
 
     def _build_doc(self) -> ScenarioDoc:
@@ -534,6 +569,12 @@ class EditorScreen:
         editing = self.current_path.stem if self.current_path is not None else "(sin guardar)"
         name = self.small_font.render(f"Editando: {editing}", True, theme.TEXT_DIM)
         surface.blit(name, (x, y))
+        y += 24
+        # Metadata en edición (la edita el botón "Datos del escenario").
+        title = self.doc_meta["title"].strip() or "(sin título)"
+        img_mark = " · con imagen" if self.doc_image is not None else ""
+        meta = self.small_font.render(f"Título: {title}{img_mark}", True, theme.TEXT_DIM)
+        surface.blit(meta, (x, y))
         y += 28
 
         y = self._sidebar_button(surface, "owner", f"Dueño: {OWNER_LABELS[self.owner]}", x, y)
@@ -558,6 +599,7 @@ class EditorScreen:
 
         for bid, label in (
             ("new", "Nuevo"),
+            ("metadata", "Datos del escenario"),
             ("save", "Guardar"),
             ("save_as", "Guardar como…"),
             ("load", "Cargar mapa"),
@@ -704,23 +746,37 @@ class ListModal:
 class SaveForm:
     """Formulario modal de guardado: título, descripción, victoria, IA, imagen.
 
-    Los campos de texto se editan escribiendo sobre el campo enfocado (click
-    para enfocar); victoria y nivel de IA son cíclicos. `handle_event` devuelve
+    Título y descripción se editan escribiendo sobre el campo enfocado (click
+    para enfocar); victoria y nivel de IA son cíclicos. La imagen se elige con
+    el botón "Elegir imagen…" (diálogo nativo del SO vía `filedialog`), que solo
+    completa la ruta del archivo a importar; la imagen se incrusta en el `.wom`
+    recién al aplicar/guardar (no se referencia desde afuera). Una miniatura
+    muestra la imagen actual o la recién elegida. `handle_event` devuelve
     "accept", "cancel" o None.
     """
 
     TEXT_FIELDS = [
         ("title", "Título"),
         ("description", "Descripción"),
-        ("image_path", "Imagen (ruta, opcional)"),
     ]
 
-    def __init__(self, meta: dict | None = None):
+    def __init__(
+        self,
+        meta: dict | None = None,
+        heading: str = "Guardar mapa / escenario",
+        accept_label: str = "Guardar (Enter)",
+        image_bytes: bytes | None = None,
+    ):
         meta = meta or {}
+        self.heading = heading
+        self.accept_label = accept_label
+        # Imagen ya cargada en el documento (para la miniatura y el aviso). La
+        # ruta del campo solo se usa al importar una imagen nueva.
+        self.has_image = image_bytes is not None
         self.fields = {
             "title": meta.get("title", ""),
             "description": meta.get("description", ""),
-            "image_path": "",  # la ruta no se persiste; la imagen ya viaja en bytes
+            "image_path": "",  # ruta de una imagen nueva a importar (opcional)
         }
         self.victory_mode = meta.get("victory_mode", VictoryMode.TOTAL)
         self.ai_level = meta.get("ai_level", "medio")
@@ -728,6 +784,30 @@ class SaveForm:
         self.font = pygame.font.SysFont(None, 30)
         self.small_font = pygame.font.SysFont(None, 22)
         self._buttons: dict[str, pygame.Rect] = {}
+        self.preview = self._load_preview_bytes(image_bytes)
+
+    @staticmethod
+    def _load_preview_bytes(data: bytes | None) -> pygame.Surface | None:
+        if not data:
+            return None
+        try:
+            return pygame.image.load(io.BytesIO(data))
+        except (pygame.error, OSError):
+            return None
+
+    def _browse_image(self) -> None:
+        """Abre el diálogo del SO; si se elige un archivo, completa la ruta y
+        actualiza la miniatura. Si tkinter no está, no pasa nada (queda el campo
+        de texto manual)."""
+        path = filedialog.pick_image()
+        if not path:
+            return
+        self.fields["image_path"] = path
+        self.active = None
+        try:
+            self.preview = pygame.image.load(path)
+        except (pygame.error, OSError):
+            self.preview = None
 
     @property
     def capturing_text(self) -> bool:
@@ -755,6 +835,9 @@ class SaveForm:
                     return "accept"
                 if key == "cancel":
                     return "cancel"
+                if key == "browse_image":
+                    self._browse_image()
+                    return None
                 if key == "victory":
                     self.victory_mode = VICTORY_MODES[
                         (VICTORY_MODES.index(self.victory_mode) + 1) % len(VICTORY_MODES)
@@ -773,13 +856,13 @@ class SaveForm:
         overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
         overlay.fill(theme.GAMEOVER_BG)
         surface.blit(overlay, (0, 0))
-        box = pygame.Rect(0, 0, 620, 470)
+        box = pygame.Rect(0, 0, 640, 580)
         box.center = surface.get_rect().center
         pygame.draw.rect(surface, theme.SIDEBAR_BG, box, border_radius=8)
         pygame.draw.rect(surface, theme.SELECTION, box, 2, border_radius=8)
         self._buttons = {}
         mouse = scale.mouse_pos()
-        title = self.font.render("Guardar mapa / escenario", True, theme.TEXT)
+        title = self.font.render(self.heading, True, theme.TEXT)
         surface.blit(title, title.get_rect(midtop=(box.centerx, box.y + 16)))
 
         y = box.y + 60
@@ -798,6 +881,8 @@ class SaveForm:
             self._buttons[f"field:{key}"] = rect
             y += 70
 
+        y = self._draw_image_row(surface, box, y, mouse)
+
         for key, label in (
             ("victory", f"Victoria:  {VICTORY_LABELS[self.victory_mode]}"),
             ("ai", f"Nivel de IA rival:  {self.ai_level}"),
@@ -815,7 +900,7 @@ class SaveForm:
         yes = pygame.Rect(box.x + 26, box.bottom - 52, 260, 38)
         no = pygame.Rect(box.right - 286, box.bottom - 52, 260, 38)
         for key, rect, label, base, hover in (
-            ("accept", yes, "Guardar (Enter)", theme.BUTTON_BG, theme.BUTTON_BG_OVER),
+            ("accept", yes, self.accept_label, theme.BUTTON_BG, theme.BUTTON_BG_OVER),
             ("cancel", no, "Cancelar (ESC)", (50, 56, 62), (70, 78, 86)),
         ):
             color = hover if rect.collidepoint(mouse) else base
@@ -823,3 +908,58 @@ class SaveForm:
             text = self.small_font.render(label, True, theme.TEXT)
             surface.blit(text, text.get_rect(center=rect.center))
             self._buttons[key] = rect
+
+    def _draw_image_row(self, surface, box, y, mouse) -> int:
+        """Fila de imagen: estado, ruta elegida, botón "Elegir imagen…" (diálogo
+        del SO) y una miniatura de la imagen actual o la recién elegida."""
+        if self.fields["image_path"].strip():
+            label = "Imagen del escenario · nueva por importar"
+        elif self.has_image:
+            label = "Imagen del escenario · imagen cargada"
+        else:
+            label = "Imagen del escenario · (ninguna)"
+        cap = self.small_font.render(label, True, theme.TEXT_DIM)
+        surface.blit(cap, (box.x + 26, y))
+        y += 22
+
+        btn_w = 180
+        field = pygame.Rect(box.x + 26, y, box.width - 52 - btn_w - 10, 36)
+        focused = self.active == "image_path"
+        pygame.draw.rect(surface, (24, 27, 30), field, border_radius=6)
+        pygame.draw.rect(
+            surface, theme.SELECTION if focused else (70, 78, 86), field, 2, border_radius=6
+        )
+        shown = self.fields["image_path"] + ("_" if focused else "")
+        text = self.small_font.render(shown, True, theme.TEXT)
+        clip = surface.get_clip()
+        surface.set_clip(field.inflate(-12, 0))
+        # Si la ruta excede el campo, se alinea a la derecha para ver el nombre.
+        tx = field.x + 8
+        if text.get_width() > field.width - 16:
+            tx = field.right - 8 - text.get_width()
+        surface.blit(text, (tx, field.y + 8))
+        surface.set_clip(clip)
+        self._buttons["field:image_path"] = field
+
+        browse = pygame.Rect(field.right + 10, y, btn_w, 36)
+        over = browse.collidepoint(mouse)
+        pygame.draw.rect(
+            surface, (70, 78, 86) if over else (50, 56, 62), browse, border_radius=6
+        )
+        blabel = self.small_font.render("Elegir imagen…", True, theme.TEXT)
+        surface.blit(blabel, blabel.get_rect(center=browse.center))
+        self._buttons["browse_image"] = browse
+        y += 44
+
+        if self.preview is not None:
+            max_w, max_h = 240, 96
+            iw, ih = self.preview.get_width(), self.preview.get_height()
+            f = min(max_w / iw, max_h / ih, 1.0)
+            thumb = pygame.transform.smoothscale(
+                self.preview, (max(1, round(iw * f)), max(1, round(ih * f)))
+            )
+            rect = thumb.get_rect(midtop=(box.centerx, y))
+            pygame.draw.rect(surface, (20, 22, 25), rect.inflate(8, 8), border_radius=6)
+            surface.blit(thumb, rect)
+            y += thumb.get_height() + 10
+        return y

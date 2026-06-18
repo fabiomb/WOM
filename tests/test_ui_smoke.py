@@ -710,3 +710,36 @@ def test_editor_esc_pide_confirmacion(screen):
     editor.draw(screen)
     editor.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_s}))
     assert editor.wants_menu
+
+
+def test_intro_de_escenario_modal_al_iniciar(screen):
+    """Con un escenario, GameScreen muestra la intro modal y la traga hasta que
+    un clic la cierra."""
+    from wom.ui.scenario_intro_overlay import ScenarioIntroOverlay
+
+    players = [Player(0, "Humano"), Player(1, "AI", is_ai=True)]
+    game = Game.new(MapParams(seed=7), players, VictoryMode.TIME)
+    intro = ScenarioIntroOverlay("El asedio", "Defendé el fuerte del norte.")
+    gs = GameScreen(game, human_id=0, intro=intro)
+    assert intro.visible
+    gs.draw(screen)  # la intro modal se dibuja por encima sin romper
+
+    # Modal: mientras está visible traga el input (un Enter no pasa el turno).
+    gs.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_RETURN}))
+    assert game.turn == 0 and not intro.visible  # Enter solo cerró la intro
+
+    # Cerrada: el juego recupera el control (Enter pasa el turno).
+    gs.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_RETURN}))
+    assert game.turn == 1
+    gs.draw(screen)
+
+
+def test_intro_vacia_no_se_muestra(screen):
+    """Un documento sin título/descripción/imagen no abre el modal."""
+    from wom.ui.scenario_intro_overlay import ScenarioIntroOverlay
+
+    intro = ScenarioIntroOverlay("", "", None)
+    assert not intro.visible
+    assert not intro.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (0, 0), "button": 1})
+    )

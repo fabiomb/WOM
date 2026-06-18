@@ -28,6 +28,7 @@ from wom.ui.menu_screen import (
 )
 from wom.ui.multiplayer_screen import MultiplayerScreen
 from wom.ui.music import MusicPlayer
+from wom.ui.scenario_intro_overlay import ScenarioIntroOverlay
 from wom.ui.music_overlay import MusicOverlay
 from wom.ui.video import apply_video_settings, parse_resolution
 
@@ -70,9 +71,12 @@ def new_game(choice: NewGameChoice) -> Game:
     return Game.new(choice.map_params(), players, choice.victory_mode)
 
 
-def scenario_game(choice: ScenarioChoice) -> Game:
-    """Arranca un escenario completo: honra la IA y la victoria del `.wom`."""
-    return build_game(load_scenario(choice.path))
+def scenario_game(choice: ScenarioChoice) -> GameScreen:
+    """Arranca un escenario completo: honra la IA y la victoria del `.wom` y
+    muestra su intro (título/descripción/imagen) sobre el mapa al empezar."""
+    doc = load_scenario(choice.path)
+    intro = ScenarioIntroOverlay(doc.title, doc.description, doc.image_bytes)
+    return GameScreen(build_game(doc), human_id=HUMAN_ID, intro=intro)
 
 
 def _start_net_game(net_start) -> GameScreen:
@@ -145,7 +149,7 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
             elif isinstance(action, NewGameChoice):
                 current = GameScreen(new_game(action), human_id=HUMAN_ID)
             elif isinstance(action, ScenarioChoice):
-                current = GameScreen(scenario_game(action), human_id=HUMAN_ID)
+                current = scenario_game(action)
             elif isinstance(action, LoadChoice):
                 current = GameScreen(load_game(action.path), human_id=HUMAN_ID)
         elif isinstance(current, MultiplayerScreen):

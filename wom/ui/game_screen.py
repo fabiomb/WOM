@@ -61,6 +61,7 @@ from wom.ui.dialogs import TroopPicker
 from wom.ui.help_overlay import HelpOverlay
 from wom.ui.hud import Hud
 from wom.ui.renderer import MapRenderer
+from wom.ui.scenario_intro_overlay import ScenarioIntroOverlay
 
 DOUBLE_CLICK_MS = 400  # ventana del doble click que fija la ruta
 
@@ -77,9 +78,13 @@ class GameScreen:
         ai_level: str = "facil",
         net=None,
         turn_seconds: int = 0,
+        intro: ScenarioIntroOverlay | None = None,
     ):
         self.game = game
         self.human_id = human_id
+        # Intro del escenario: modal con título/descripción/imagen sobre el
+        # mapa al empezar (None en partidas normales). Se cierra con un clic.
+        self.scenario_intro = intro
         # Modo red (humano vs humano): el par aporta sus órdenes por la red en
         # vez de la AI, y el turno se resuelve cuando llegan las dos listas.
         self.net = net
@@ -195,6 +200,10 @@ class GameScreen:
     # --- input -------------------------------------------------------------
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        # Intro del escenario: modal dominante al empezar; mientras esté visible
+        # traga todo el input (un clic/Enter/ESC la cierran).
+        if self.scenario_intro is not None and self.scenario_intro.handle_event(event):
+            return
         # Ayuda (F1): modal por encima de todo. Si está visible, traga el input;
         # si no, F1 la abre desde cualquier estado (salvo escribiendo en chat).
         if self.help.handle_event(event):
@@ -727,6 +736,9 @@ class GameScreen:
             )
         # La ayuda va arriba de todo (incluidos los modales).
         self.help.draw(surface, self.game)
+        # La intro del escenario, si sigue abierta, manda sobre todo lo demás.
+        if self.scenario_intro is not None:
+            self.scenario_intro.draw(surface)
 
     def _net_panel(self, animating: bool) -> dict | None:
         """Datos para el panel de red del HUD (chat, estado, reloj de turno)."""
@@ -767,6 +779,7 @@ class GameScreen:
             or self.pending_quit
             or self.game_over
             or self._grab_anchor is not None  # el grab manda mientras dure
+            or (self.scenario_intro is not None and self.scenario_intro.visible)
         )
         if not blocked:
             self.renderer.camera.edge_pan(

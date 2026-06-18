@@ -163,6 +163,129 @@ def test_nuevo_resetea_el_archivo_asociado(editor, tmp_path, monkeypatch):
     assert editor.doc_meta["title"] == ""
 
 
+def test_editar_metadata_sin_guardar(editor, tmp_path, monkeypatch):
+    """El botón "Datos del escenario" actualiza la metadata en edición pero no
+    escribe ningún archivo."""
+    import wom.persistence.scenario as scenario
+    from wom.ui.editor_screen import SaveForm
+
+    monkeypatch.setattr(scenario, "MAPS_DIR", tmp_path)
+    form = SaveForm()
+    form.fields["title"] = "Sin guardar"
+    form.fields["description"] = "Solo metadata"
+    editor._form_mode = "meta"
+    editor._apply_form_meta(form)
+
+    assert editor.doc_meta["title"] == "Sin guardar"
+    assert editor.doc_meta["description"] == "Solo metadata"
+    assert editor.current_path is None  # no se asoció ningún archivo
+    assert list(tmp_path.glob("*.wom")) == []  # ni se guardó
+
+
+def test_metadata_se_conserva_al_guardar(editor, tmp_path, monkeypatch):
+    """La metadata editada antes de guardar viaja al `.wom`."""
+    import wom.persistence.scenario as scenario
+    from wom.ui.editor_screen import SaveForm
+
+    monkeypatch.setattr(scenario, "MAPS_DIR", tmp_path)
+    form = SaveForm()
+    form.fields["title"] = "Editado en vivo"
+    form.ai_level = "dificil"
+    editor._apply_form_meta(form)  # solo metadata, sin guardar
+
+    editor._save_to(None)  # ahora guarda con la metadata ya cargada
+    saved = list(tmp_path.glob("*.wom"))
+    assert len(saved) == 1
+    doc = load_scenario(saved[0])
+    assert doc.title == "Editado en vivo"
+    assert doc.ai_level == "dificil"
+
+
+def test_boton_metadata_abre_form_en_modo_meta(screen, editor):
+    editor.draw(screen)
+    btn = editor._buttons["metadata"]
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": btn.center, "button": 1})
+    )
+    assert editor.save_form is not None
+    assert editor._form_mode == "meta"
+    editor.draw(screen)  # el formulario no debe romper el dibujo
+
+
+def test_elegir_imagen_con_dialogo_la_importa(editor, tmp_path, monkeypatch):
+    """El botón "Elegir imagen…" usa el diálogo del SO; la imagen elegida se
+    importa (bytes) y queda incrustada dentro del `.wom` al guardar."""
+    import wom.persistence.scenario as scenario
+    from wom.ui import filedialog
+    from wom.ui.editor_screen import SaveForm
+
+    monkeypatch.setattr(scenario, "MAPS_DIR", tmp_path)
+    img = pygame.Surface((10, 8))
+    img.fill((200, 30, 30))
+    img_path = tmp_path / "portada.png"
+    pygame.image.save(img, str(img_path))
+
+    form = SaveForm()
+    form.fields["title"] = "Con imagen"
+    monkeypatch.setattr(filedialog, "pick_image", lambda *a, **k: str(img_path))
+    form._browse_image()  # equivale a clickear "Elegir imagen…"
+    assert form.fields["image_path"] == str(img_path)
+    assert form.preview is not None  # miniatura cargada
+
+    editor._apply_form_and_save(form)
+    saved = list(tmp_path.glob("*.wom"))
+    assert len(saved) == 1
+    doc = load_scenario(saved[0])
+    assert doc.image_bytes is not None  # la imagen viajó dentro del `.wom`
+
+
+def test_elegir_imagen_cancelado_no_cambia_nada(monkeypatch):
+    from wom.ui import filedialog
+    from wom.ui.editor_screen import SaveForm
+
+    monkeypatch.setattr(filedialog, "pick_image", lambda *a, **k: None)
+    form = SaveForm()
+    form._browse_image()
+    assert form.fields["image_path"] == "" and form.preview is None
+
+
+def test_form_con_imagen_existente_muestra_miniatura(screen, tmp_path):
+    """Al abrir el form de un documento con imagen, hay miniatura y aviso."""
+    from wom.ui.editor_screen import SaveForm
+
+    img = pygame.Surface((12, 9))
+    img.fill((40, 80, 200))
+    raw = (tmp_path / "x.png")
+    pygame.image.save(img, str(raw))
+    data = raw.read_bytes()
+    form = SaveForm(image_bytes=data)
+    assert form.has_image and form.preview is not None
+    form.draw(screen)  # la fila de imagen con miniatura no debe romper
+
+
+def test_boton_elegir_imagen_desde_el_editor(screen, editor, tmp_path, monkeypatch):
+    """Flujo completo por la UI: Datos del escenario → Elegir imagen…"""
+    from wom.ui import filedialog
+
+    img = pygame.Surface((6, 6))
+    img.fill((10, 200, 10))
+    p = tmp_path / "i.png"
+    pygame.image.save(img, str(p))
+    monkeypatch.setattr(filedialog, "pick_image", lambda *a, **k: str(p))
+
+    editor.draw(screen)
+    meta_btn = editor._buttons["metadata"]
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": meta_btn.center, "button": 1})
+    )
+    editor.draw(screen)  # dibuja el form y registra el botón "Elegir imagen…"
+    browse = editor.save_form._buttons["browse_image"]
+    editor.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": browse.center, "button": 1})
+    )
+    assert editor.save_form.fields["image_path"] == str(p)
+
+
 def test_refresh_terrain_autotila(editor):
     # Pintar agua aislada y verificar que el renderer la registró como costa.
     editor.set_terrain((3, 3), Terrain.WATER)
