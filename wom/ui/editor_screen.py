@@ -46,8 +46,8 @@ TERRAIN_TOOLS: list[tuple[Terrain, str]] = [
     (Terrain.FOREST, "Bosque"),
     (Terrain.MOUNTAIN, "Montaña"),
     (Terrain.WATER, "Agua"),
-    (Terrain.BRIDGE_H, "Puente ↔"),
-    (Terrain.BRIDGE_V, "Puente ↕"),
+    (Terrain.BRIDGE_H, "Puente E-O"),
+    (Terrain.BRIDGE_V, "Puente N-S"),
 ]
 OWNERS = [NEUTRAL, 0, 1]
 OWNER_LABELS = {NEUTRAL: "Neutral", 0: "Jugador 1", 1: "Jugador 2"}

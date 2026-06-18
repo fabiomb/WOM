@@ -385,9 +385,9 @@ class MultiplayerScreen:
     def _draw_waiting(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         y = area.y + 20
         rows = [
-            f"Vos: {self.f_name.value or '—'}  {'✔ listo' if self.local_ready else ''}",
+            f"Vos: {self.f_name.value or '—'}  {'(listo)' if self.local_ready else ''}",
             f"Rival: {self.peer_name or 'esperando…'}"
-            f"  {'✔ listo' if self.peer_ready else ''}",
+            f"  {'(listo)' if self.peer_ready else ''}",
         ]
         for text in rows:
             label = self.font.render(text, True, theme.TEXT)

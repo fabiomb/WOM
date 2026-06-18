@@ -49,6 +49,16 @@ def _load(name: str, size: int) -> pygame.Surface:
     return surface
 
 
+def load_scaled(name: str, size: int) -> pygame.Surface:
+    """Carga un sprite de data/assets/ escalado a `size`×`size`.
+
+    Igual que el escalado interno de `Assets`, pero a un tamaño arbitrario:
+    útil fuera del mapa (p. ej. la ayuda de F1, que muestra los mismos tiles).
+    Si el archivo falta devuelve un cuadrado de color (fallback).
+    """
+    return _load(name, size)
+
+
 def load_image(name: str) -> pygame.Surface | None:
     """Carga un PNG de data/assets/ a su tamaño original, o None si falta.
 

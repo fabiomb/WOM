@@ -161,6 +161,10 @@ class Hud:
                 surface, "Click en un fuerte propio para crear ejércitos",
                 x, y, self.small_font, theme.TEXT_DIM,
             )
+            y = self._text(
+                surface, "F1: cómo jugar (ayuda)",
+                x, y, self.small_font, theme.SELECTION,
+            )
 
         if result is not None and result.is_over:
             self._create_button_visible = False

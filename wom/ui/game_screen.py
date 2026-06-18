@@ -58,6 +58,7 @@ from wom.ui.animation import (
 )
 from wom.ui.assets import Assets
 from wom.ui.dialogs import TroopPicker
+from wom.ui.help_overlay import HelpOverlay
 from wom.ui.hud import Hud
 from wom.ui.renderer import MapRenderer
 
@@ -137,6 +138,8 @@ class GameScreen:
         self.split_picker: TroopPicker | None = None
         # Salida al menú pendiente de confirmar (ESC en plena partida).
         self.pending_quit = False
+        # Ayuda visual rápida (F1): modal por encima de todo, no toca el juego.
+        self.help = HelpOverlay()
         self._dialog_buttons: dict[str, pygame.Rect] = {}
         # Doble click que fija la ruta: (ticks, tile) del último click de path.
         self._last_path_click: tuple[int, Coord] | None = None
@@ -192,6 +195,17 @@ class GameScreen:
     # --- input -------------------------------------------------------------
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        # Ayuda (F1): modal por encima de todo. Si está visible, traga el input;
+        # si no, F1 la abre desde cualquier estado (salvo escribiendo en chat).
+        if self.help.handle_event(event):
+            return
+        if (
+            event.type == pygame.KEYDOWN
+            and event.key == pygame.K_F1
+            and not self.chat_active
+        ):
+            self.help.toggle()
+            return
         if self.pending_merge is not None:
             choice = self.merge_picker.handle_event(event)
             if choice == "accept":
@@ -371,7 +385,7 @@ class GameScreen:
         # cantidades por clase para transferir solo una parte.
         self.merge_picker = TroopPicker(
             "Fusionar ejércitos",
-            f"#{selected.id} ({selected.total_troops} tropas) → "
+            f"#{selected.id} ({selected.total_troops} tropas) » "
             f"#{occupant.id} ({occupant.total_troops} tropas) · máx {max_size}",
             rows,
             cap=room,
@@ -711,6 +725,8 @@ class GameScreen:
                 surface, "¿Salir al menú?",
                 "La partida no guardada se pierde", "Salir (S)",
             )
+        # La ayuda va arriba de todo (incluidos los modales).
+        self.help.draw(surface, self.game)
 
     def _net_panel(self, animating: bool) -> dict | None:
         """Datos para el panel de red del HUD (chat, estado, reloj de turno)."""
