@@ -20,6 +20,10 @@ producen tropas, pueblos que dan comida y batallas autoresueltas. Hecho en
   jugador crea o reabastece un ejército.
 - **Batallas autoresueltas** al intentar entrar al tile de un enemigo: poder
   por composición, terreno, comida y experiencia; el perdedor se retira.
+- **Zoom de batalla en tiempo real** (opcional, partida individual): al chocar,
+  el juego pregunta si dirigís el combate o lo auto-resuelve. Si lo dirigís,
+  desplegás y das órdenes a tus tropas en vivo (mover, atacar, aguantar) en un
+  mini-RTS, en campo abierto o asaltando un fuerte con su muralla y puerta.
 - **Tres niveles de IA** (fácil / medio / difícil) sobre un mismo motor de
   scoring de objetivos, balanceados por simulación masiva.
 - **Tres modos de victoria**: conquista total, captura de banderas o límite de
@@ -38,6 +42,10 @@ producen tropas, pueblos que dan comida y batallas autoresueltas. Hecho en
 | Menú | Nueva partida |
 | --- | --- |
 | ![Menú principal](docs/screenshot_menu_main.png) | ![Nueva partida](docs/screenshot_menu_new.png) |
+
+| Mapa general | Zoom de batalla en tiempo real |
+| --- | --- |
+| ![Partida sobre el mapa generado](docs/screenshot_m2.png) | ![Dirigir la batalla en tiempo real](docs/screenshot_batalla.png) |
 
 ## Multijugador (red local)
 
@@ -172,6 +180,7 @@ originales se conservan con prefijo `_` y se regeneran con
 .venv/bin/python -m pytest tests -v                            # suite completa
 PYTHONPATH=. .venv/bin/python tools/simulate.py --games 30       # balance IA vs IA
 PYTHONPATH=. .venv/bin/python tools/screenshot_m2.py             # captura headless del juego
+PYTHONPATH=. .venv/bin/python tools/screenshot_battle.py         # captura del zoom de batalla
 PYTHONPATH=. .venv/bin/python tools/screenshot_multiplayer.py    # capturas del modo en red
 ```
 
@@ -180,6 +189,7 @@ PYTHONPATH=. .venv/bin/python tools/screenshot_multiplayer.py    # capturas del 
 .venv\Scripts\python -m pytest tests -v
 $env:PYTHONPATH='D:\dev\WOM'; .venv\Scripts\python tools\simulate.py --games 30
 $env:PYTHONPATH='D:\dev\WOM'; .venv\Scripts\python tools\screenshot_m2.py
+$env:PYTHONPATH='D:\dev\WOM'; .venv\Scripts\python tools\screenshot_battle.py
 $env:PYTHONPATH='D:\dev\WOM'; .venv\Scripts\python tools\screenshot_multiplayer.py
 ```
 
