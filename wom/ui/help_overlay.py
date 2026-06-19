@@ -254,6 +254,7 @@ class HelpOverlay:
             "3. Parate sobre un fuerte/pueblo neutral para capturarlo.",
             "4. Seleccioná el fuerte y usá «Crear ejército» para sacar tropas de la reserva.",
             "5. Mandá la tropa correcta al terreno correcto y presioná los fuertes del rival.",
+            "6. Al chocar, elegí «Dirigir batalla» para pelear en tiempo real, o auto-resolver.",
         ]
         col_w = rect.width // 2
         for i, step in enumerate(steps):

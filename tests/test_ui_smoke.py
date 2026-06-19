@@ -40,6 +40,14 @@ def _click(gs: GameScreen, point, button=1):
     )
 
 
+def _auto_resolve_battles(gs: GameScreen):
+    """El zoom de batalla pregunta por cada combate del humano; elegir siempre
+    'auto-resolver' reproduce el camino determinista de antes (resolve_battle).
+    Cierra el turno cuando se vacía la cola de batallas."""
+    while gs._tactical_prompt is not None:
+        gs._resolve_tactical_prompt(zoom=False)
+
+
 def test_render_inicial(screen, game_screen):
     game_screen.draw(screen)  # no debe lanzar
 
@@ -62,6 +70,7 @@ def test_animacion_de_choque_en_batalla(screen, game_screen):
     b = game.spawn_army(1, enemy_pos, {"soldado": 100})
     game_screen.pending_paths[a.id] = [enemy_pos]
     game_screen.end_turn()
+    _auto_resolve_battles(game_screen)  # el humano pelea: elegir auto-resolver
     assert game.last_clashes == [(a.id, b.id)]
     anim = game_screen.animation
     assert anim is not None and anim.clash_points
@@ -72,6 +81,37 @@ def test_animacion_de_choque_en_batalla(screen, game_screen):
     assert game_screen.animating
     assert anim.clash_effects(in_clash)
     game_screen.draw(screen)  # ejércitos embistiendo + destello sin romper
+
+
+def test_zoom_de_batalla_aplica_resultado_y_cierra_turno(screen, game_screen):
+    """Flujo completo del zoom: batalla del humano → prompt → dirigir → el
+    BattleResult del combate se aplica y el turno se cierra."""
+    game = game_screen.game
+    a = game.armies_of(0)[0]
+    enemy_pos = next(
+        pos for pos in game.world.neighbors(a.position)
+        if game.army_at(pos) is None and game.world.fort_at(pos) is None
+    )
+    b = game.spawn_army(1, enemy_pos, {"soldado": 30})
+    game_screen.pending_paths[a.id] = [enemy_pos]
+    turno = game.turn
+    game_screen.end_turn()
+    assert game_screen._tactical_prompt == (a.id, b.id)  # pregunta por la batalla
+    game_screen._resolve_tactical_prompt(zoom=True)  # el jugador dirige
+    bs = game_screen._tactical_battle
+    assert bs is not None
+    for _ in range(20000):  # corre el combate hasta el final
+        bs.ai.update(bs.battle, 1 / 30)
+        bs.battle.step(1 / 30)
+        if bs.battle.finished:
+            break
+    assert bs.battle.finished
+    bs.result = bs.battle.to_battle_result()
+    game_screen._finish_tactical_battle()
+    assert game_screen._tactical_battle is None
+    assert game.turn == turno + 1            # el turno se cerró
+    assert (a.id, b.id) in game.last_clashes  # la batalla quedó registrada
+    assert game_screen.animation is not None  # recap del turno armado
 
 
 def test_seleccion_y_path_por_clicks(screen, game_screen):
@@ -628,6 +668,7 @@ def test_partida_completa_desde_la_ui(screen, game_screen):
     limit = game_screen.game.config["turnos_limite_default"]
     for _ in range(limit + 1):
         game_screen.end_turn()
+        _auto_resolve_battles(game_screen)  # responde el prompt de zoom si aparece
         game_screen.draw(screen)
         if game_screen.game_over:
             break

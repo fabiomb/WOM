@@ -41,6 +41,7 @@ from wom.core.army import Army
 from wom.core.battle import (
     ATTACKER_FALLS_BACK,
     DEFENDER_FALLS_BACK,
+    BattleResult,
     resolve_battle,
 )
 from wom.core.config import UnitClass, load_game_config, load_unit_classes
@@ -194,14 +195,38 @@ class Game:
     # --- fases del turno -------------------------------------------------
 
     def run_turn(self, orders: list[Order]) -> VictoryResult:
-        """Ejecuta un turno completo y devuelve el estado de victoria."""
+        """Ejecuta un turno completo y devuelve el estado de victoria.
+
+        Es la suma de `begin_turn` + resolver cada batalla con `resolve_battle`
+        (determinista) + `finish_turn`. La UI single-player conduce esas piezas
+        por separado para intercalar el combate táctico, pero red/headless/IA
+        usan este camino monolítico, que es el invariante determinista.
+        """
+        pending = self.begin_turn(orders)
+        for attacker_id, defender_id in pending:
+            self.resolve_one_battle(attacker_id, defender_id)
+        return self.finish_turn()
+
+    def begin_turn(self, orders: list[Order]) -> list[tuple[int, int]]:
+        """Primera mitad del turno: aplica órdenes y mueve los ejércitos.
+
+        Deja `_battle_queue` armado y devuelve sus pares (atacante, defensor)
+        como lista. La UI los consume uno a uno con `resolve_one_battle` para
+        poder abrir el combate táctico entre medio.
+        """
         self.last_battles.clear()
         self.last_clashes.clear()
         self.last_retreats.clear()
         self.last_moves.clear()
+        self._battle_queue.clear()
         self._apply_orders(orders)
         self._move_armies()
-        self._resolve_battles()
+        return list(self._battle_queue)
+
+    def finish_turn(self) -> VictoryResult:
+        """Segunda mitad del turno: captura, producción, recuperación,
+        avance del contador de turno y chequeo de victoria."""
+        self._battle_queue.clear()
         self._capture()
         self._produce()
         self._recover()
@@ -288,35 +313,47 @@ class Game:
                 army.path.pop(0)
                 points -= cost
 
-    def _resolve_battles(self) -> None:
-        for attacker_id, defender_id in self._battle_queue:
-            attacker = self.army_by_id(attacker_id)
-            defender = self.army_by_id(defender_id)
-            if attacker is None or defender is None:
-                continue  # destruido en una batalla previa de este turno
+    def resolve_one_battle(
+        self,
+        attacker_id: int,
+        defender_id: int,
+        result: BattleResult | None = None,
+    ) -> None:
+        """Resuelve una batalla de la cola y aplica sus efectos.
+
+        Si `result` es None la resuelve con `resolve_battle` (camino
+        determinista por seed). Si se le pasa un `BattleResult` ya armado —el
+        que produce el combate táctico de la UI— lo aplica igual: bajas, XP,
+        retiradas y muertes pasan por la misma maquinaria, así el core sigue
+        siendo la autoridad y el zoom solo elige el resultado.
+        """
+        attacker = self.army_by_id(attacker_id)
+        defender = self.army_by_id(defender_id)
+        if attacker is None or defender is None:
+            return  # destruido en una batalla previa de este turno
+        if result is None:
             result = resolve_battle(
                 attacker, defender, self.world, self.classes,
                 self.config["batalla"], self.rng,
             )
-            self.last_battles.append((defender.position, result.outcome.name))
-            self.last_clashes.append((attacker.id, defender.id))
-            self.battles_fought += 1
-            self.players[attacker.owner].troops_lost += attacker.apply_losses(
-                result.attacker_losses
-            )
-            self.players[defender.owner].troops_lost += defender.apply_losses(
-                result.defender_losses
-            )
-            attacker.xp += result.attacker_xp_delta
-            defender.xp += result.defender_xp_delta
-            if result.outcome in ATTACKER_FALLS_BACK:
-                self._retreat(attacker, defender.position)
-            if result.outcome in DEFENDER_FALLS_BACK:
-                self._retreat(defender, attacker.position)
-            for army in (attacker, defender):
-                if army.is_destroyed:
-                    self._kill(army)
-        self._battle_queue.clear()
+        self.last_battles.append((defender.position, result.outcome.name))
+        self.last_clashes.append((attacker.id, defender.id))
+        self.battles_fought += 1
+        self.players[attacker.owner].troops_lost += attacker.apply_losses(
+            result.attacker_losses
+        )
+        self.players[defender.owner].troops_lost += defender.apply_losses(
+            result.defender_losses
+        )
+        attacker.xp += result.attacker_xp_delta
+        defender.xp += result.defender_xp_delta
+        if result.outcome in ATTACKER_FALLS_BACK:
+            self._retreat(attacker, defender.position)
+        if result.outcome in DEFENDER_FALLS_BACK:
+            self._retreat(defender, attacker.position)
+        for army in (attacker, defender):
+            if army.is_destroyed:
+                self._kill(army)
 
     def _retreat(self, army: Army, enemy_pos: Coord) -> None:
         """Mueve al ejército al tile vecino libre más alejado del enemigo.

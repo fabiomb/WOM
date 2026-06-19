@@ -78,6 +78,36 @@ def test_no_hay_retirada_dentro_de_un_fuerte():
     assert fort.owner == 1  # el atacante no pudo entrar a capturar
 
 
+def test_run_turn_equivale_a_begin_resolve_finish():
+    """Conducir el turno por piezas (begin_turn + resolve_one_battle +
+    finish_turn) debe dar un estado idéntico a run_turn sobre el mismo seed.
+
+    Es la red de seguridad del refactor que permite intercalar el combate
+    táctico: el camino monolítico (red/headless/IA) no debe cambiar.
+    """
+
+    def jugar(usar_piezas: bool) -> dict:
+        game = _make_game()
+        game.spawn_army(0, (2, 1), {"soldado": 100})
+        game.spawn_army(1, (4, 1), {"soldado": 60})
+        ordenes = [
+            [MoveOrder(army_id=0, path=((3, 1), (4, 1)))],
+            [],
+            [],
+        ]
+        for orders in ordenes:
+            if usar_piezas:
+                pending = game.begin_turn(orders)
+                for attacker_id, defender_id in pending:
+                    game.resolve_one_battle(attacker_id, defender_id)
+                game.finish_turn()
+            else:
+                game.run_turn(orders)
+        return game.to_dict()
+
+    assert jugar(usar_piezas=False) == jugar(usar_piezas=True)
+
+
 def test_turn_limit_termina_la_partida_en_cualquier_modo():
     """El tope de turnos del host (turn_limit) corta la partida con desempate
     por territorio/tropas, incluso en modo conquista total."""

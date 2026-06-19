@@ -43,7 +43,7 @@ def test_core_does_not_import_pygame():
     code = (
         "import sys; "
         "import wom.core.game, wom.core.battle, wom.core.mapgen, "
-        "wom.ai.ai_player, wom.headless, "
+        "wom.core.tactical, wom.ai.ai_player, wom.ai.tactical_ai, wom.headless, "
         "wom.persistence.savegame, wom.persistence.scenario, "
         "wom.net.protocol, wom.net.orders_codec, wom.net.state_hash, "
         "wom.net.transport, wom.net.session, wom.net.config_fingerprint, "

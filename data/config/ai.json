@@ -15,6 +15,10 @@
       "evita_peligro": false,
       "fusiona": false,
       "divide": false,
+      "tactico": {
+        "prio_rango": 0.0,
+        "intervalo": 1.4
+      },
       "descripcion": "Ataca casi siempre, ignora la economía y la defensa."
     },
     "medio": {
@@ -32,6 +36,10 @@
       "evita_peligro": false,
       "fusiona": true,
       "divide": false,
+      "tactico": {
+        "prio_rango": 3.0,
+        "intervalo": 0.9
+      },
       "descripcion": "Calcula distancias, defiende fuertes, ataca con ventaja numérica."
     },
     "dificil": {
@@ -49,6 +57,10 @@
       "evita_peligro": true,
       "fusiona": true,
       "divide": true,
+      "tactico": {
+        "prio_rango": 6.0,
+        "intervalo": 0.5
+      },
       "descripcion": "Gestiona economía, agrupa ejércitos, guarnece fuertes y reacciona al jugador."
     }
   },

@@ -34,11 +34,14 @@ seleccionarlo o al terminar el primer turno).
 
 from __future__ import annotations
 
+import random
+
 import pygame
 
 from wom.ai.ai_player import AIPlayer, choose_personality
 from wom.core.config import load_ai_personalities
 from wom.core.game import Game
+from wom.core.tactical import build_tactical_battle
 from wom.core.orders import (
     CreateArmyOrder,
     MoveOrder,
@@ -57,6 +60,7 @@ from wom.ui.animation import (
     spawn_highlight_rings,
 )
 from wom.ui.assets import Assets
+from wom.ui.battle_screen import BattleScreen
 from wom.ui.dialogs import TroopPicker
 from wom.ui.help_overlay import HelpOverlay
 from wom.ui.hud import Hud
@@ -82,6 +86,7 @@ class GameScreen:
     ):
         self.game = game
         self.human_id = human_id
+        self.ai_level = ai_level  # fallback de nivel para el zoom de batalla
         # Intro del escenario: modal con título/descripción/imagen sobre el
         # mapa al empezar (None en partidas normales). Se cierra con un clic.
         self.scenario_intro = intro
@@ -143,6 +148,18 @@ class GameScreen:
         self.split_picker: TroopPicker | None = None
         # Salida al menú pendiente de confirmar (ESC en plena partida).
         self.pending_quit = False
+        # Zoom de batalla (solo partida individual): tras begin_turn, las
+        # batallas del humano se resuelven una a una preguntando "¿zoom o
+        # auto-resolver?". `_tactical_queue` son las batallas que faltan
+        # procesar este turno; `_tactical_prompt` la que espera la elección;
+        # `_tactical_battle` la pantalla de combate activa; `_tactical_active`
+        # el par (atacante, defensor) que se está dirigiendo; y `_tactical_pre`
+        # el snapshot pre-turno para armar la animación de recap al terminar.
+        self._tactical_queue: list[tuple[int, int]] = []
+        self._tactical_prompt: tuple[int, int] | None = None
+        self._tactical_battle: BattleScreen | None = None
+        self._tactical_active: tuple[int, int] | None = None
+        self._tactical_pre: list[dict] | None = None
         # Ayuda visual rápida (F1): modal por encima de todo, no toca el juego.
         self.help = HelpOverlay()
         self._dialog_buttons: dict[str, pygame.Rect] = {}
@@ -214,6 +231,25 @@ class GameScreen:
             and not self.chat_active
         ):
             self.help.toggle()
+            return
+        # Combate táctico activo: la pantalla de batalla domina todo el input.
+        if self._tactical_battle is not None:
+            self._tactical_battle.handle_event(event)
+            return
+        # Modal "¿zoom o auto-resolver?": Z/Enter abre el zoom, A/ESC auto.
+        if self._tactical_prompt is not None:
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_z, pygame.K_RETURN, pygame.K_KP_ENTER):
+                    self._resolve_tactical_prompt(zoom=True)
+                elif event.key in (pygame.K_a, pygame.K_ESCAPE):
+                    self._resolve_tactical_prompt(zoom=False)
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                yes = self._dialog_buttons.get("yes")
+                no = self._dialog_buttons.get("no")
+                if yes is not None and yes.collidepoint(event.pos):
+                    self._resolve_tactical_prompt(zoom=True)
+                elif no is not None and no.collidepoint(event.pos):
+                    self._resolve_tactical_prompt(zoom=False)
             return
         if self.pending_merge is not None:
             choice = self.merge_picker.handle_event(event)
@@ -604,13 +640,97 @@ class GameScreen:
             orders.extend(ai.decide_orders(self.game))
         # Snapshot pre-turno: conserva sprite/posición de los que mueran.
         pre_turn = [army.to_dict() for army in self.game.armies]
-        self.result = self.game.run_turn(orders)
-        self.animation = build_turn_animation(self.game, pre_turn)
-        self.animation_start = pygame.time.get_ticks()
         self.pending_paths.clear()
         self.pending_creations.clear()
         self.selected_id = None
         self.selected_fort = None
+        # Mueve los ejércitos y deja la cola de batallas. Si alguna involucra
+        # al humano, se resuelven con el flujo de zoom (pregunta por batalla);
+        # si no, es el camino de siempre (resolver todo + animar).
+        pending = self.game.begin_turn(orders)
+        if any(self._involves_human(a, d) for a, d in pending):
+            self._tactical_queue = list(pending)
+            self._tactical_pre = pre_turn
+            self._advance_tactical_queue()
+        else:
+            for attacker_id, defender_id in pending:
+                self.game.resolve_one_battle(attacker_id, defender_id)
+            self._finish_turn_animation(pre_turn)
+
+    def _finish_turn_animation(self, pre_turn: list[dict]) -> None:
+        """Cierra el turno (finish_turn) y arma la animación de recap."""
+        self.result = self.game.finish_turn()
+        self.animation = build_turn_animation(self.game, pre_turn)
+        self.animation_start = pygame.time.get_ticks()
+
+    def _involves_human(self, attacker_id: int, defender_id: int) -> bool:
+        for army_id in (attacker_id, defender_id):
+            army = self.game.army_by_id(army_id)
+            if army is not None and army.owner == self.human_id:
+                return True
+        return False
+
+    def _advance_tactical_queue(self) -> None:
+        """Procesa la próxima batalla de la cola del turno.
+
+        Las del humano abren el modal "¿zoom o auto-resolver?"; las de IA
+        contra IA se auto-resuelven sin preguntar. Al vaciarse la cola, cierra
+        el turno y dispara la animación de recap (marcha + choque + retirada).
+        """
+        while self._tactical_queue:
+            attacker_id, defender_id = self._tactical_queue.pop(0)
+            attacker = self.game.army_by_id(attacker_id)
+            defender = self.game.army_by_id(defender_id)
+            if attacker is None or defender is None:
+                continue  # destruido en una batalla previa: resolve la ignora
+            if self._involves_human(attacker_id, defender_id):
+                self._tactical_prompt = (attacker_id, defender_id)
+                return  # espera la elección del jugador (modal)
+            self.game.resolve_one_battle(attacker_id, defender_id)
+        pre_turn, self._tactical_pre = self._tactical_pre, None
+        self._finish_turn_animation(pre_turn or [])
+
+    def _resolve_tactical_prompt(self, zoom: bool) -> None:
+        """El jugador eligió zoom (combate dirigido) o auto-resolver."""
+        attacker_id, defender_id = self._tactical_prompt
+        self._tactical_prompt = None
+        if not zoom:
+            self.game.resolve_one_battle(attacker_id, defender_id)
+            self._advance_tactical_queue()
+            return
+        attacker = self.game.army_by_id(attacker_id)
+        defender = self.game.army_by_id(defender_id)
+        # RNG propia: no toca game.rng, así el flujo determinista del core
+        # (producción, futuras batallas auto) queda intacto elija lo que elija.
+        battle = build_tactical_battle(
+            attacker, defender, self.game.world, self.game.classes,
+            self.game.config["batalla"], random.Random(),
+        )
+        enemy_owner = (
+            defender.owner if attacker.owner == self.human_id else attacker.owner
+        )
+        self._tactical_battle = BattleScreen(
+            battle, human_owner=self.human_id,
+            enemy_level=self._enemy_ai_level(enemy_owner),
+        )
+        self._tactical_active = (attacker_id, defender_id)
+
+    def _enemy_ai_level(self, owner: int) -> str:
+        """Nivel de IA del rival en una batalla (el de su jugador, o el fallback)."""
+        for ai in self.ais:
+            if ai.player_id == owner:
+                return ai.level
+        return self.ai_level
+
+    def _finish_tactical_battle(self) -> None:
+        """La pantalla de combate terminó: aplica su resultado al core."""
+        attacker_id, defender_id = self._tactical_active
+        bs = self._tactical_battle
+        result = None if bs.auto_resolve else bs.result
+        self.game.resolve_one_battle(attacker_id, defender_id, result=result)
+        self._tactical_battle = None
+        self._tactical_active = None
+        self._advance_tactical_queue()
 
     def _end_turn_net(self) -> None:
         """Modo red: envía las órdenes locales y espera al rival; el turno se
@@ -626,8 +746,14 @@ class GameScreen:
         self.notice_until = pygame.time.get_ticks() + 10**9
 
     def update(self) -> None:
-        """Una vez por frame (la llama el loop de la app). Sin red, no hace
-        nada; en red conduce el lockstep y dispara la animación de cada turno."""
+        """Una vez por frame (la llama el loop de la app). Conduce el combate
+        táctico si hay uno activo; en red conduce el lockstep y dispara la
+        animación de cada turno; sin red ni batalla, no hace nada."""
+        if self._tactical_battle is not None:
+            self._tactical_battle.update()
+            if self._tactical_battle.done:
+                self._finish_tactical_battle()
+            return
         if self.net is None:
             return
         self.net.update()
@@ -674,6 +800,10 @@ class GameScreen:
     # --- dibujo ----------------------------------------------------------------
 
     def draw(self, surface: pygame.Surface) -> None:
+        # Combate táctico: ocupa toda la pantalla por encima del mapa.
+        if self._tactical_battle is not None:
+            self._tactical_battle.draw(surface)
+            return
         surface.fill(theme.BACKGROUND)
         self._update_camera()  # paneo por bordes, una vez por frame
         animating = self.animating  # una sola lectura del reloj por frame
@@ -734,6 +864,8 @@ class GameScreen:
                 surface, "¿Salir al menú?",
                 "La partida no guardada se pierde", "Salir (S)",
             )
+        elif self._tactical_prompt is not None:
+            self._draw_tactical_prompt(surface)
         # La ayuda va arriba de todo (incluidos los modales).
         self.help.draw(surface, self.game)
         # La intro del escenario, si sigue abierta, manda sobre todo lo demás.
@@ -785,6 +917,50 @@ class GameScreen:
             self.renderer.camera.edge_pan(
                 scale.mouse_pos(), dt, (0, 0, *theme.WINDOW_SIZE)
             )
+
+    def _draw_tactical_prompt(self, surface: pygame.Surface) -> None:
+        """Modal por batalla: dirigir el combate (zoom) o que lo resuelva el
+        motor. Muestra quién pelea y dónde."""
+        attacker_id, defender_id = self._tactical_prompt
+        attacker = self.game.army_by_id(attacker_id)
+        defender = self.game.army_by_id(defender_id)
+        en_fuerte = (
+            defender is not None
+            and self.game.world.fort_at(defender.position) is not None
+        )
+        lugar = "Asalto a fuerte" if en_fuerte else "Batalla en campo abierto"
+        atk_n = attacker.total_troops if attacker else 0
+        def_n = defender.total_troops if defender else 0
+
+        overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        overlay.fill(theme.GAMEOVER_BG)
+        surface.blit(overlay, (0, 0))
+        box = pygame.Rect(0, 0, 520, 180)
+        box.center = surface.get_rect().center
+        pygame.draw.rect(surface, theme.SIDEBAR_BG, box, border_radius=8)
+        pygame.draw.rect(surface, theme.SELECTION, box, 2, border_radius=8)
+
+        title = self.hud.font.render(f"¡{lugar}!", True, theme.TEXT)
+        detail = self.hud.small_font.render(
+            f"Tus tropas: {atk_n if attacker and attacker.owner == self.human_id else def_n}"
+            f"   ·   Enemigo: {def_n if attacker and attacker.owner == self.human_id else atk_n}",
+            True, theme.TEXT_DIM,
+        )
+        surface.blit(title, title.get_rect(midtop=(box.centerx, box.y + 16)))
+        surface.blit(detail, detail.get_rect(midtop=(box.centerx, box.y + 48)))
+
+        yes = pygame.Rect(box.x + 30, box.bottom - 58, 210, 40)
+        no = pygame.Rect(box.right - 240, box.bottom - 58, 210, 40)
+        mouse = scale.mouse_pos()
+        for rect, text, base, hover in (
+            (yes, "Dirigir batalla (Z)", theme.BUTTON_BG, theme.BUTTON_BG_OVER),
+            (no, "Auto-resolver (A)", (50, 56, 62), (70, 78, 86)),
+        ):
+            color = hover if rect.collidepoint(mouse) else base
+            pygame.draw.rect(surface, color, rect, border_radius=6)
+            label = self.hud.font.render(text, True, theme.TEXT)
+            surface.blit(label, label.get_rect(center=rect.center))
+        self._dialog_buttons = {"yes": yes, "no": no}
 
     def _draw_confirm_dialog(
         self, surface: pygame.Surface, title: str, detail: str, yes_label: str

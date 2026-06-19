@@ -200,6 +200,36 @@ no se retira nunca** — hay que aniquilarlo para echarlo.
 **Para asaltar un fuerte bien defendido, los arqueros son clave**: anulan el
 bonus de las murallas para su parte del ataque.
 
+### Zoom de batalla (combate en tiempo real)
+
+En **partida individual**, cada vez que se produce una batalla tuya el juego te
+pregunta: **«Dirigir batalla» (tecla Z)** o **«Auto-resolver» (tecla A)**. Así
+elegís qué combates jugar y cuáles dejar que resuelva el motor.
+
+Si elegís dirigir, entrás a un **campo de batalla en tiempo real** donde tus
+tropas se despliegan como unidades, **cada una con el color de su jugador**
+(rojo J1, azul J2, verde J3, amarillo J4) y su cantidad de tropas:
+
+- Arranca en **preparación** con una **cuenta regresiva**: tus tropas
+  **aguantan** la posición —no atacan solas— para que vos decidas la táctica. El
+  combate empieza solo al llegar el contador a 0, o antes con **Espacio** (o el
+  botón «Comenzar»).
+- **Clic** en una unidad para seleccionarla; **arrastrá** un recuadro para
+  seleccionar un grupo; **A** selecciona todas.
+- **Clic derecho** sobre el enemigo para atacarlo, o sobre el campo para mover.
+- **H** para que el grupo aguante la posición. **ESC** pausa.
+- Las unidades a las que no les des orden aguantan; al rival lo conduce la IA
+  **con el nivel de su ejército** (un rival fácil pelea torpe; uno difícil
+  prioriza tus arqueros y caballería y reacciona rápido).
+- Los **arqueros** disparan a distancia (mantenelos detrás y protegidos).
+- Si el defensor está en un fuerte, el campo tiene **murallas y una puerta**: el
+  atacante debe cruzarla, y los **arqueros disparan por encima** de la muralla.
+
+Cuando un bando es aniquilado o se quiebra, la batalla termina y el resultado
+(bajas, XP, retirada) se aplica igual que una batalla normal. Podés tocar
+**«Auto-resolver»** en cualquier momento para que el motor termine el combate.
+En **multijugador** las batallas siempre se auto-resuelven (no hay zoom).
+
 ---
 
 ## 7. Cómo se gana
@@ -252,6 +282,10 @@ En cualquier modo, si dejás al rival sin ejércitos ni fuertes, ganás al insta
 | Dividir ejército                    | Botón "Dividir ejército" o tecla **D** |
 | Crear ejército (fuerte elegido)     | Botón "Crear ejército" |
 | Fin del turno                       | Botón "Fin del turno" o **Enter** |
+| Dirigir / auto-resolver una batalla | Tecla **Z** (zoom) / **A** (auto) en el aviso de batalla |
+| En el combate: comenzar             | **Espacio** (tras ordenar a tus tropas en la preparación) |
+| En el combate: seleccionar          | Arrastrar recuadro, clic en unidad, **A** todas |
+| En el combate: mover / atacar       | Clic derecho (campo / enemigo); **H** aguantar; **ESC** pausa |
 | Guardar partida                     | Botón "Guardar" o tecla **G** |
 | Zoom                                | Rueda del mouse |
 | Desplazar el mapa (con zoom)        | Mouse al borde, o arrastrar con botón del medio |

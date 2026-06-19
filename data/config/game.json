@@ -27,7 +27,22 @@
     "bonus_defensa_fort": 1.5,
     "bonus_defensa_town": 1.2,
     "factor_comida_min": 0.5,
-    "factor_xp_min": 0.5
+    "factor_xp_min": 0.5,
+    "tactico": {
+      "campo_ancho": 30,
+      "campo_alto": 18,
+      "tropas_por_ficha": 5,
+      "max_fichas_por_bando": 40,
+      "escala_velocidad": 0.9,
+      "escala_dano": 0.05,
+      "alcance_cuerpo": 1.0,
+      "alcance_arquero": 6.0,
+      "cooldown_ataque": 0.6,
+      "umbral_quiebre": 0.25,
+      "duracion_max": 90.0,
+      "separacion_radio": 0.7,
+      "separacion_fuerza": 1.4
+    }
   },
   "turnos_limite_default": 50,
   "turnos_cruz": 5,
