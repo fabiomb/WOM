@@ -32,7 +32,20 @@ from wom.ai.tactical_ai import TacticalAI
 from wom.core.battle import BattleOutcome, BattleResult
 from wom.core.tactical import TacticalBattle, Unit
 from wom.ui import scale, theme
-from wom.ui.assets import load_scaled
+from wom.ui.assets import load_image, load_scaled
+
+# Fondo del campo abierto (cielo+montañas arriba, pradera abajo). El campo de
+# juego se ubica en la pradera (debajo del horizonte). Solo campo abierto; el
+# castillo usa el render por celdas hasta tener su propio asset.
+OPEN_FIELD_BG = "fondo-batalla-terreno"   # fondo de campo abierto (pradera)
+FORT_BG = "fondo-batalla-fuerte"          # fondo del asalto a fuerte (muralla+puerta)
+HORIZON_OPEN = 0.40   # campo abierto: el horizonte termina ~40% (pradera abajo)
+HORIZON_FORT = 0.33   # fuerte: el terreno arranca ~1/3 (cielo arriba)
+DEPTH_FAR = 0.8       # escala de las tropas más lejanas (arriba, cerca del horizonte)
+DEPTH_NEAR = 1.0      # escala de las más cercanas al observador (abajo)
+SPRITE_SCALE = 1.0    # tamaño del sprite respecto de la celda (más grande = más legible)
+DISC_SCALE = 0.58     # radio del disco/anillo del dueño respecto de la celda
+DISC_ALPHA = 105      # opacidad del disco (translúcido: deja ver la pradera detrás)
 
 FIELD_BG = {
     "plains": (74, 104, 58),
@@ -50,9 +63,9 @@ SELECT_COLOR = (250, 220, 60)
 ATTACK_LINE = (255, 120, 90)
 PREP_SECONDS = 10.0  # cuenta regresiva de preparación antes del combate
 
-def _darken(color: tuple[int, int, int], factor: float = 0.55) -> tuple[int, int, int]:
-    """Versión apagada de un color (para el disco bajo el sprite)."""
-    return tuple(int(c * factor) for c in color)
+def _lighten(color: tuple[int, int, int], factor: float = 0.45) -> tuple[int, int, int]:
+    """Versión aclarada de un color (para el disco translúcido bajo el sprite)."""
+    return tuple(int(c + (255 - c) * factor) for c in color)
 
 
 OUTCOME_TEXT = {
@@ -89,6 +102,16 @@ class BattleScreen:
         self.result: BattleResult | None = None
         self._last_ticks: int | None = None
         self._sprite_cache: dict[tuple[str, int], pygame.Surface] = {}
+        # Fondo según el escenario: pradera (campo abierto) o fuerte (con
+        # muralla+puerta dibujadas). Se carga una vez y se escala al área en
+        # _layout; con fondo, el campo se ubica en el terreno (debajo del
+        # horizonte) y las tropas escalan por profundidad. Si falta el asset,
+        # degrada al render por celdas.
+        is_fort = bool(battle.walls)
+        self._bg_src = load_image(FORT_BG if is_fort else OPEN_FIELD_BG)
+        self.has_bg = self._bg_src is not None
+        self._horizon = HORIZON_FORT if is_fort else HORIZON_OPEN
+        self._bg_scaled: pygame.Surface | None = None
         # Efectos de flecha en vuelo (solo visual): cada uno
         # {"from","to","t0","dur"}. Se generan cuando un arquero ataca.
         self._arrows: list[dict] = []
@@ -115,9 +138,18 @@ class BattleScreen:
         w, h = window
         self.win_w, self.win_h = w, h
         area_h = h - HUD_H
-        self.cell = min(w / self.battle.field_w, area_h / self.battle.field_h)
+        self._area_rect = pygame.Rect(0, HUD_H, w, area_h)
+        if self.has_bg:
+            # Campo en la pradera (debajo del horizonte): banda inferior.
+            band_top = HUD_H + area_h * self._horizon
+            band_h = area_h * (1.0 - self._horizon)
+            self._bg_scaled = pygame.transform.scale(self._bg_src, (w, area_h))
+        else:
+            band_top = HUD_H
+            band_h = area_h
+        self.cell = min(w / self.battle.field_w, band_h / self.battle.field_h)
         self.ox = (w - self.cell * self.battle.field_w) / 2
-        self.oy = HUD_H + (area_h - self.cell * self.battle.field_h) / 2
+        self.oy = band_top + (band_h - self.cell * self.battle.field_h) / 2
         self._auto_btn = pygame.Rect(w - 230, 12, 210, HUD_H - 24)
         # Botón "Comenzar" (solo en preparación), a la izquierda del de auto.
         self._start_btn = pygame.Rect(w - 470, 12, 220, HUD_H - 24)
@@ -128,8 +160,18 @@ class BattleScreen:
     def to_cell(self, px: float, py: float) -> tuple[float, float]:
         return (px - self.ox) / self.cell, (py - self.oy) / self.cell
 
-    def _sprite(self, class_id: str) -> pygame.Surface:
-        size = max(10, int(self.cell * 0.72))
+    def _depth(self, cell_y: float) -> float:
+        """Escala por profundidad: 0.8 arriba (lejos) → 1.0 abajo (cerca).
+
+        Da un pseudo-3D barato sobre el fondo con horizonte. Sin fondo (campo
+        por celdas / castillo) no se aplica."""
+        if not self.has_bg:
+            return 1.0
+        frac = max(0.0, min(1.0, cell_y / max(1, self.battle.field_h)))
+        return DEPTH_FAR + (DEPTH_NEAR - DEPTH_FAR) * frac
+
+    def _sprite(self, class_id: str, depth: float = 1.0) -> pygame.Surface:
+        size = max(10, int(self.cell * SPRITE_SCALE * depth))
         key = (class_id, size)
         if key not in self._sprite_cache:
             self._sprite_cache[key] = load_scaled(class_id, size)
@@ -297,6 +339,9 @@ class BattleScreen:
 
     def _draw_field(self, surface: pygame.Surface) -> None:
         surface.fill((24, 26, 24))
+        if self.has_bg and self._bg_scaled is not None:
+            surface.blit(self._bg_scaled, self._area_rect.topleft)
+            return
         b = self.battle
         mid = self.ox + self.cell * b.field_w / 2
         atk_col = FIELD_BG.get(b.attacker_terrain, FIELD_BG["plains"])
@@ -311,6 +356,8 @@ class BattleScreen:
         )
 
     def _draw_walls(self, surface: pygame.Surface) -> None:
+        if self.has_bg:
+            return  # la muralla y la puerta ya están en el dibujo de fondo
         for (cx, cy) in self.battle.walls:
             px, py = self.to_px(cx, cy)
             rect = pygame.Rect(px, py, int(self.cell) + 1, int(self.cell) + 1)
@@ -323,23 +370,34 @@ class BattleScreen:
             )
 
     def _draw_units(self, surface: pygame.Surface) -> None:
-        r = max(7, int(self.cell * 0.46))
-        ring = max(3, int(self.cell * 0.1))
-        for u in self.battle.units:
-            if not u.active:
-                continue
+        base_r = self.cell * DISC_SCALE
+        # Pintar de atrás (arriba/lejos) hacia adelante (abajo/cerca): las
+        # cercanas tapan a las lejanas, reforzando la profundidad.
+        units = sorted(
+            (u for u in self.battle.units if u.active), key=lambda u: u.y
+        )
+        for u in units:
+            depth = self._depth(u.y)
+            r = max(6, int(base_r * depth))
+            ring = max(2, int(self.cell * 0.12 * depth))
             px, py = self.to_px(u.x, u.y)
             color = theme.player_color(u.owner)  # color del jugador dueño
-            # Disco tenue + sprite + anillo grueso en el color del jugador (como
-            # el borde de los ejércitos en el mapa), para que se lea el dueño.
-            pygame.draw.circle(surface, _darken(color), (px, py), r)
-            sprite = self._sprite(u.class_id)
+            # Disco translúcido y claro (deja ver la pradera por la transparencia
+            # del sprite) + sprite + anillo opaco del dueño para leer el bando.
+            self._blit_disc(surface, px, py, r, _lighten(color))
+            sprite = self._sprite(u.class_id, depth)
             surface.blit(sprite, sprite.get_rect(center=(px, py)))
             pygame.draw.circle(surface, color, (px, py), r, ring)
             if u.id in self.selected:
                 pygame.draw.circle(surface, SELECT_COLOR, (px, py), r + ring, 2)
             self._draw_health(surface, u, px, py, r)
             self._draw_count(surface, u, px, py, r)
+
+    def _blit_disc(self, surface, px, py, r, color) -> None:
+        """Disco translúcido del color del dueño (deja ver el fondo detrás)."""
+        disc = pygame.Surface((2 * r, 2 * r), pygame.SRCALPHA)
+        pygame.draw.circle(disc, (*color, DISC_ALPHA), (r, r), r)
+        surface.blit(disc, (px - r, py - r))
         # Líneas de ataque de las fichas seleccionadas (feedback de órdenes).
         for uid in self.selected:
             u = self.battle.unit_by_id(uid)

@@ -29,8 +29,8 @@
     "factor_comida_min": 0.5,
     "factor_xp_min": 0.5,
     "tactico": {
-      "campo_ancho": 30,
-      "campo_alto": 18,
+      "campo_ancho": 24,
+      "campo_alto": 12,
       "tropas_por_ficha": 5,
       "max_fichas_por_bando": 40,
       "escala_velocidad": 0.9,

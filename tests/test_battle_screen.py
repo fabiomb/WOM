@@ -11,9 +11,9 @@ import pytest
 from wom.core.army import Army
 from wom.core.config import load_game_config, load_unit_classes
 from wom.core.tactical import build_tactical_battle
-from wom.core.worldmap import Terrain, WorldMap
+from wom.core.worldmap import Fort, Terrain, WorldMap
 from wom.ui import theme
-from wom.ui.battle_screen import BattleScreen
+from wom.ui.battle_screen import HORIZON_FORT, HORIZON_OPEN, BattleScreen
 
 
 @pytest.fixture(scope="module")
@@ -31,6 +31,35 @@ def _battle():
     return build_tactical_battle(
         a, d, world, load_unit_classes(), load_game_config()["batalla"], random.Random(4)
     )
+
+
+def _fort_battle():
+    tiles = [[Terrain.PLAINS] * 10 for _ in range(8)]
+    world = WorldMap(width=10, height=8, tiles=tiles)
+    world.forts.append(Fort(position=(6, 2), owner=1))
+    a = Army(id=0, owner=0, position=(5, 2), composition={"soldado": 30})
+    d = Army(id=1, owner=1, position=(6, 2), composition={"soldado": 25})
+    return build_tactical_battle(
+        a, d, world, load_unit_classes(), load_game_config()["batalla"], random.Random(4)
+    )
+
+
+def test_campo_abierto_usa_fondo_y_profundidad(screen):
+    bs = BattleScreen(_battle(), human_owner=0)
+    assert bs.has_bg  # campo abierto: carga el fondo de pradera
+    assert bs._horizon == HORIZON_OPEN
+    # Profundidad: las de arriba (lejos) más chicas que las de abajo (cerca).
+    assert bs._depth(0) < bs._depth(bs.battle.field_h)
+    assert abs(bs._depth(0) - 0.8) < 1e-6
+    bs.draw(screen)  # render con fondo sin lanzar
+
+
+def test_castillo_usa_fondo_de_fuerte(screen):
+    bs = BattleScreen(_fort_battle(), human_owner=0)
+    assert bs.has_bg                     # el fuerte tiene su propio fondo
+    assert bs._horizon == HORIZON_FORT   # terreno arranca ~1/3 (cielo arriba)
+    assert bs.battle.walls and bs.battle.gate_cells  # muralla+puerta (colisión)
+    bs.draw(screen)  # render con fondo de fuerte sin lanzar
 
 
 def test_render_y_pasos(screen):

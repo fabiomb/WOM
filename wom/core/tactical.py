@@ -481,20 +481,20 @@ def build_tactical_battle(
 
     units: list[Unit] = []
     next_id = 0
-    # Atacante a la izquierda; defensor a la derecha (o dentro del castillo).
-    next_id = _deploy(
-        attacker, classes, tcfg, rng, units, next_id,
-        zone=(2.0, w * 0.28, 1.5, h - 1.5),
-    )
+    # Atacante en el campo de la izquierda; defensor enfrente (o en el patio
+    # del fuerte, a la derecha, detrás de la muralla).
     if defender_in_fort:
-        inner = (min(c[0] for c in walls) + 1.5, max(c[0] for c in walls) - 0.5,
-                 min(c[1] for c in walls) + 1.5, max(c[1] for c in walls) - 0.5)
-        _deploy(defender, classes, tcfg, rng, units, next_id, zone=inner)
+        fx0 = min(c[0] for c in walls)
+        fx1 = max(c[0] for c in walls)
+        fy0 = min(c[1] for c in walls)
+        fy1 = max(c[1] for c in walls)
+        attacker_zone = (1.0, max(2.0, fx0 - 2.5), 2.0, h - 2.0)
+        defender_zone = (fx0 + 1.5, fx1 - 0.5, fy0 + 1.5, fy1 - 0.5)
     else:
-        _deploy(
-            defender, classes, tcfg, rng, units, next_id,
-            zone=(w * 0.72, w - 2.0, 1.5, h - 1.5),
-        )
+        attacker_zone = (2.0, w * 0.28, 1.5, h - 1.5)
+        defender_zone = (w * 0.72, w - 2.0, 1.5, h - 1.5)
+    next_id = _deploy(attacker, classes, tcfg, rng, units, next_id, zone=attacker_zone)
+    _deploy(defender, classes, tcfg, rng, units, next_id, zone=defender_zone)
 
     battle = TacticalBattle(
         attacker_owner=attacker.owner,
@@ -567,9 +567,15 @@ def _deploy(army, classes, tcfg, rng, units, next_id, *, zone) -> int:
 
 
 def _castle_layout(w: int, h: int) -> tuple[set[tuple[int, int]], list[tuple[int, int]]]:
-    """Muralla rectangular sobre la mitad derecha con una puerta a la izquierda."""
-    x0, x1 = int(w * 0.62), w - 2
-    y0, y1 = 2, h - 3
+    """Muralla rectangular alineada con el dibujo del fuerte.
+
+    Frente (con la **puerta principal**) hacia la izquierda, por donde llega el
+    atacante; interior (patio del defensor) a la derecha. Las fracciones están
+    calibradas al asset `fondo-batalla-fuerte.png` (fuerte a la derecha-centro,
+    puerta mirando a la izquierda).
+    """
+    x0, x1 = max(2, int(w * 0.46)), w - 2   # muro frontal (puerta) .. muro trasero
+    y0, y1 = 1, h - 2
     walls: set[tuple[int, int]] = set()
     for x in range(x0, x1 + 1):
         walls.add((x, y0))
@@ -577,7 +583,7 @@ def _castle_layout(w: int, h: int) -> tuple[set[tuple[int, int]], list[tuple[int
     for y in range(y0, y1 + 1):
         walls.add((x0, y))
         walls.add((x1, y))
-    # Puerta: dos celdas en el centro del muro izquierdo (lado atacante).
+    # Puerta: dos celdas en el centro del muro frontal (lado atacante).
     gate_y = (y0 + y1) // 2
     gate = [(x0, gate_y), (x0, gate_y + 1)]
     for cell in gate:
