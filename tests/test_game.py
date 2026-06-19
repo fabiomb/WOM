@@ -441,6 +441,39 @@ def test_victoria_total():
     assert result.mode == VictoryMode.TOTAL
 
 
+def test_ffa_cuatro_jugadores_gana_el_ultimo():
+    """Free-for-all de 4: la victoria total es del último jugador con presencia
+    (ejército o fuerte); los demás eliminados no empatan."""
+    width, height = 8, 5
+    tiles = [[Terrain.PLAINS] * width for _ in range(height)]
+    world = WorldMap(width=width, height=height, tiles=tiles)
+    for pid, pos in enumerate([(0, 0), (7, 0), (0, 4), (7, 4)]):
+        world.forts.append(Fort(position=pos, owner=pid))
+    game = Game(
+        world=world,
+        players=[Player(i, f"P{i}") for i in range(4)],
+        armies=[],
+        classes=load_unit_classes(),
+        config=load_game_config(),
+        victory_mode=VictoryMode.TOTAL,
+        rng=random.Random(1),
+        seed=1,
+    )
+    game._spawn_initial_armies()
+    assert len(game.armies) == 4  # un ejército inicial por jugador
+    # El jugador 0 conquista los fuertes de 1, 2 y 3 y elimina sus ejércitos.
+    for pid in (1, 2, 3):
+        for fort in world.forts:
+            if fort.owner == pid:
+                fort.owner = 0
+        for army in list(game.armies):
+            if army.owner == pid:
+                game.armies.remove(army)
+    result = game.run_turn([])
+    assert result.is_over and result.winner == 0
+    assert result.mode == VictoryMode.TOTAL
+
+
 def test_victoria_por_tiempo():
     game = _make_game(victory_mode=VictoryMode.TIME)
     game.spawn_army(0, (1, 1), {"soldado": 30})

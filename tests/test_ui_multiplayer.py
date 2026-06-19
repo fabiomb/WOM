@@ -107,8 +107,9 @@ def test_lobby_completo_hasta_listo(screen):
             and client.session is not None
             and client.session.state is SessionState.LOBBY,
         ), "no se alcanzó el lobby"
-        assert host.peer_name == "Cliente"
-        assert client.peer_name == "Host"
+        # El host ve al rival en su roster; el cliente conoce el nombre del host.
+        assert any(name == "Cliente" for _pid, name, _r in host.session.roster())
+        assert client.session.peer_name == "Host"
 
         # Ambos marcan "Listo" → arranca.
         host._activate("ready")
@@ -128,6 +129,54 @@ def test_lobby_completo_hasta_listo(screen):
     finally:
         host._teardown()
         client._teardown()
+
+
+def test_lobby_cuatro_jugadores(screen):
+    """El host configura 4 jugadores y espera a que se conecten los 3 rivales;
+    con todos listos arranca y cada uno reconstruye el mismo estado inicial."""
+    host = MultiplayerScreen("Host")
+    host.mode = "create"
+    host.f_hostport.value = "0"
+    host.n_players = 4
+    host._activate("host_start")
+    port = host.server.port
+
+    clients = []
+    for i in range(3):
+        c = MultiplayerScreen(f"C{i + 1}")
+        c.mode = "connect"
+        c.f_ip.value = "127.0.0.1"
+        c.f_connectport.value = str(port)
+        c._activate("connect_start")
+        clients.append(c)
+
+    screens = [host, *clients]
+    try:
+        # Esperar a que TODOS lleguen al lobby (el host recién manda el setup
+        # cuando están los 3 rivales).
+        assert _pump(
+            screens,
+            lambda: all(
+                s.session is not None and s.session.state is SessionState.LOBBY
+                for s in screens
+            ),
+        ), "no se alcanzó el lobby con 4 jugadores"
+        assert len(host.session.roster()) == 4
+
+        for s in screens:
+            s._activate("ready")
+        assert _pump(
+            screens, lambda: all(s.mode == "started" for s in screens)
+        ), "no arrancó la partida de 4"
+
+        assert host.net_start.human_id == 0
+        assert sorted(c.net_start.human_id for c in clients) == [1, 2, 3]
+        ref = host.net_start.game.to_dict()
+        assert all(c.net_start.game.to_dict() == ref for c in clients)
+        assert len(host.net_start.game.players) == 4
+    finally:
+        for s in screens:
+            s._teardown()
 
 
 def test_conexion_fallida_no_rompe(screen):

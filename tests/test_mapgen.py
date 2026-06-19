@@ -43,6 +43,28 @@ def test_fuertes_iniciales_en_bandas_opuestas():
     assert x1 >= params.width - band
 
 
+def test_cuatro_jugadores_en_esquinas_distintas():
+    """Con 4 jugadores hay 4 fuertes iniciales (uno por jugador), en esquinas
+    separadas y todo alcanzable."""
+    params, world = _gen(7, n_players=4, n_forts=6)
+    starts = [f for f in world.forts if f.owner >= 0]
+    assert sorted(f.owner for f in starts) == [0, 1, 2, 3]
+    assert all(f.owner == -1 for f in world.forts[4:])
+    # Las cuatro posiciones iniciales son distintas y bien repartidas.
+    positions = [f.position for f in starts]
+    assert len(set(positions)) == 4
+    assert _is_fully_connected(world)
+
+
+def test_validacion_de_jugadores():
+    import pytest
+
+    with pytest.raises(ValueError):
+        MapParams(seed=1, n_players=5)  # supera el tope
+    with pytest.raises(ValueError):
+        MapParams(seed=1, n_players=4, n_forts=3)  # menos fuertes que jugadores
+
+
 def test_todo_alcanzable():
     for seed in range(10):
         _, world = _gen(seed)

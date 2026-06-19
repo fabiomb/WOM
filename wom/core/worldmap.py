@@ -8,6 +8,7 @@ from enum import Enum
 Coord = tuple[int, int]  # (x, y)
 
 NEUTRAL = -1  # owner de forts/towns sin dueño
+MAX_PLAYERS = 4  # tope de jugadores por partida (free-for-all, v1: humano + IAs)
 
 
 class Terrain(str, Enum):

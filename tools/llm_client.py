@@ -40,7 +40,6 @@ from wom.net.session import (  # noqa: E402
     Connected,
     Disconnected,
     GameReady,
-    ReadyChanged,
     Rejected,
     Started,
 )
@@ -101,16 +100,15 @@ def run_lobby(session: ClientSession) -> Game | None:
     while True:
         for event in session.update():
             if isinstance(event, Connected):
-                print(f"Conectado al host «{event.peer_name}». Esperando partida…")
+                print(f"Conectado al host «{event.name}». Esperando a los demás…")
             elif isinstance(event, Rejected):
                 print(f"Rechazado: {event.reason}")
                 return None
             elif isinstance(event, GameReady):
                 setup = event.setup
                 session.set_ready(True)
-                print("Partida recibida. Marqué «Listo», esperando al host…")
-            elif isinstance(event, ReadyChanged):
-                print(f"El host {'está listo' if event.ready else 'canceló su listo'}.")
+                print(f"Partida recibida (sos el jugador {setup.human_id}). "
+                      "Marqué «Listo», esperando al host…")
             elif isinstance(event, Started):
                 print("¡Arranca la partida!")
                 return Game.from_dict(setup.state)
@@ -122,7 +120,9 @@ def run_lobby(session: ClientSession) -> Game | None:
 
 def play(session: ClientSession, game: Game, player: LLMPlayer, peer_name: str) -> None:
     """Bucle de juego: lockstep con el LLM aportando las órdenes del turno."""
-    net = NetGame(session, game, human_id=HUMAN_ID, is_host=False, peer_name=peer_name)
+    human_id = session.human_id if session.human_id is not None else HUMAN_ID
+    player.player_id = human_id  # el host pudo asignarle un id distinto de 1
+    net = NetGame(session, game, human_id=human_id, is_host=False, peer_name=peer_name)
     chat_seen = 0
     while net.phase is not Phase.ENDED:
         net.update()

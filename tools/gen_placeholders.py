@@ -45,9 +45,11 @@ ICONS = {  # 32x32
     "cross": (40, 40, 40),
 }
 FLAGS = {  # 32x32, mástil + paño del color del dueño (ver theme.PLAYER_COLORS)
-    "flag": (150, 150, 150),      # sitio neutral
-    "flag_red": (210, 70, 60),    # jugador 0 (humano)
-    "flag_blue": (70, 110, 210),  # jugador 1 (AI)
+    "flag": (150, 150, 150),        # sitio neutral
+    "flag_red": (210, 70, 60),      # jugador 0 (humano)
+    "flag_blue": (70, 110, 210),    # jugador 1
+    "flag_green": (80, 175, 80),    # jugador 2
+    "flag_yellow": (225, 195, 70),  # jugador 3
 }
 
 

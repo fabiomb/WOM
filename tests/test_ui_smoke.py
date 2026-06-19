@@ -274,16 +274,56 @@ def test_menu_nueva_partida(screen):
     assert menu.mode == "new"
     menu.draw(screen)
 
-    _click_menu(menu, "ai_level")  # facil → medio
+    _click_menu(menu, "ai_level:0")  # facil → medio (único rival por defecto)
     _click_menu(menu, "victory")   # total → flags
     menu.draw(screen)
     _click_menu(menu, "start")
     action = menu.take_action()
     assert isinstance(action, NewGameChoice)
-    assert action.ai_level == "medio"
+    assert action.ai_levels == ("medio",)  # 1 rival
     assert action.victory_mode == VictoryMode.FLAGS
     assert action.map_params().width == 30  # tamaño "medio" por defecto
     assert menu.take_action() is None  # la acción se consume
+
+
+def test_menu_cuatro_jugadores(screen):
+    """Sumar rivales hasta 4 jugadores y elegir el nivel de cada IA."""
+    menu = MenuScreen(default_ai_level="facil")
+    menu.draw(screen)
+    _click_menu(menu, "new")
+    menu.draw(screen)
+    _click_menu(menu, "n_opponents")  # 1 → 2 rivales (rival nuevo: "medio")
+    _click_menu(menu, "n_opponents")  # 2 → 3 rivales (máximo: 4 jugadores)
+    menu.draw(screen)
+    _click_menu(menu, "ai_level:2")   # nivel del tercer rival: medio → dificil
+    menu.draw(screen)
+    _click_menu(menu, "start")
+    action = menu.take_action()
+    # El primer rival mantiene el nivel por defecto ("facil"); los agregados "medio".
+    assert action.ai_levels == ("facil", "medio", "dificil")
+    assert action.n_players == 4
+    params = action.map_params()
+    assert params.n_players == 4 and params.n_forts >= 4
+
+
+def test_new_game_cuatro_jugadores_vs_ia(screen):
+    """Flujo local completo: la decisión del menú arma 4 jugadores (humano + 3
+    IAs con su nivel) y la partida corre un turno con las 3 IAs."""
+    from wom.ui.app import new_game
+    from wom.ui.menu_screen import NewGameChoice
+
+    choice = NewGameChoice(("facil", "medio", "dificil"), "chico", VictoryMode.TOTAL, seed=5)
+    game = new_game(choice)
+    assert len(game.players) == 4
+    assert game.players[0].is_ai is False
+    assert [p.ai_level for p in game.players[1:]] == ["facil", "medio", "dificil"]
+    assert len(game.armies_of(0)) == 1  # ejército inicial del humano
+
+    gs = GameScreen(game, human_id=0)
+    assert len(gs.ais) == 3
+    gs.end_turn()
+    assert game.turn == 1
+    gs.draw(screen)
 
 
 def test_menu_cargar_partida(screen, tmp_path, monkeypatch):

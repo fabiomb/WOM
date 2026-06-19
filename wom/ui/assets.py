@@ -17,7 +17,9 @@ from wom.ui.tiling import WATER_VARIANTS
 ASSETS_DIR = resource_root() / "data" / "assets"
 
 UNIT_IDS = ("partisano", "soldado", "caballero", "arquero")
-ICON_IDS = ("fort", "town", "flag", "flag_red", "flag_blue", "cross")
+ICON_IDS = (
+    "fort", "town", "flag", "flag_red", "flag_blue", "flag_green", "flag_yellow", "cross"
+)
 FALLBACK_COLOR = (200, 0, 200)
 
 

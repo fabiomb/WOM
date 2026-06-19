@@ -1,20 +1,21 @@
 """Pantalla de Multijugador: hub, crear/conectar y sala de espera (lobby).
 
 Es una pantalla de nivel superior del loop (como el menú o la partida). Maneja
-toda la red de la fase de lobby:
+toda la red de la fase de lobby para partidas de 2 a `MAX_PLAYERS` jugadores
+(topología estrella, el host es la autoridad):
 
 - **Hub**: crear partida o conectarse.
-- **Crear** (host): nombre + reglas (victoria, tamaño de mapa, turnos máximos,
-  tiempo por turno, puerto) → "Esperar conexiones" abre el `Server`.
+- **Crear** (host): nombre + reglas (jugadores, victoria, tamaño de mapa, turnos
+  máximos, tiempo por turno, puerto) → "Esperar conexiones" abre el `Server`.
 - **Conectar** (cliente): nombre + IP + puerto → "Conectar".
-- **Sala de espera**: estado de la conexión, aviso cuando entra el rival, botón
-  "Listo" de cada uno y "Cancelar". Cuando ambos están listos el host arranca
-  y la pantalla pasa a "listo para jugar".
+- **Sala de espera**: la lista de jugadores (host + rivales) con su estado de
+  "listo", el botón "Listo" propio y "Cancelar". Cuando se conectaron todos y
+  todos están listos, el host arranca y la pantalla pasa a "listo para jugar".
 
 Conduce la `Session` (host o cliente) llamando a `update()` una vez por frame
-desde el loop de la app y traduce sus eventos a estado de UI. El arranque real
-de la partida en red (intercambio de órdenes, `run_turn` sincronizado) es de la
-fase MP4: acá se deja preparado `net_start` con todo lo necesario.
+desde el loop de la app y traduce sus eventos a estado de UI; el roster se lee
+de la sesión cada frame. El arranque real de la partida (lockstep) lo hace
+`NetGame` sobre el `NetGameStart` que se deja preparado acá.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import pygame
 from wom.core.game import Game, Player
 from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
+from wom.core.worldmap import MAX_PLAYERS
 from wom.net.protocol import GameSetup
 from wom.net.rules import MatchRules
 from wom.net.session import (
@@ -34,7 +36,6 @@ from wom.net.session import (
     Disconnected,
     GameReady,
     HostSession,
-    ReadyChanged,
     Rejected,
     SessionState,
     Started,
@@ -48,14 +49,14 @@ CONNECT_TIMEOUT = 4.0
 
 @dataclass
 class NetGameStart:
-    """Todo lo que MP4 necesita para arrancar la partida en red."""
+    """Todo lo que la app necesita para arrancar la partida en red."""
 
     role: str  # "host" | "client"
     session: HostSession | ClientSession
     game: Game
     human_id: int
     rules: MatchRules
-    peer_name: str
+    peer_name: str = ""  # lo deriva NetGame de los jugadores si va vacío
 
 
 class TextField:
@@ -103,15 +104,14 @@ class MultiplayerScreen:
         # Reglas cíclicas (host).
         self.victory_mode = VictoryMode.TOTAL
         self.map_size = "medio"
+        self.n_players = 2  # total de jugadores (2..MAX_PLAYERS)
 
         # Estado de red.
         self.role: str | None = None
         self.server: Server | None = None
         self.session: HostSession | ClientSession | None = None
         self.status = ""
-        self.local_ready = False
-        self.peer_ready = False
-        self.peer_name: str | None = None
+        self._fed: set = set()  # conexiones ya entregadas a la HostSession
         self._client_setup: GameSetup | None = None
         self._host_game: Game | None = None
         self._host_rules: MatchRules | None = None
@@ -135,47 +135,60 @@ class MultiplayerScreen:
     # --- red (llamado una vez por frame desde el loop) ---------------------
 
     def update(self) -> None:
-        if self.mode != "waiting":
+        if self.mode != "waiting" or self.session is None:
             return
-        if self.role == "host" and self.session is None and self.server is not None:
-            conn = self.server.poll_connection()
-            if conn is not None:
-                self.session = HostSession(
-                    conn, self.f_name.value or "Host", self._setup_provider
-                )
-                self.status = "Jugador conectado, validando…"
-        if self.session is not None:
-            for event in self.session.update():
-                self._on_net_event(event)
+        if self.role == "host" and self.server is not None:
+            for conn in self.server.poll_connections():
+                if conn not in self._fed:
+                    self._fed.add(conn)
+                    self.session.add_connection(conn)
+        for event in self.session.update():
+            self._on_net_event(event)
+        if self.role == "host" and self.session.state is SessionState.CONNECTING:
+            connected = len(self.session.roster()) - 1
+            self.status = (
+                f"Esperando jugadores ({connected}/{self.n_players - 1}) "
+                f"en el puerto {self.server.port}…"
+            )
 
-    def _setup_provider(self, client_name: str) -> GameSetup:
-        """Construye el estado inicial de la partida al conectarse el cliente."""
-        host_name = self.f_name.value or "Host"
+    def _setup_provider(self, names: list[str]) -> GameSetup:
+        """Construye el estado inicial cuando se conectaron todos los rivales.
+
+        `names` viene ordenado por id (host primero). Todos los jugadores son
+        humanos; el `human_id` de cada `GameSetup` lo pone la HostSession.
+        """
         width, height, forts, towns = MAP_SIZES[self.map_size]
-        players = [Player(0, host_name), Player(1, client_name)]
-        game = Game.new(MapParams(width, height, forts, towns), players, self.victory_mode)
+        forts = max(forts, self.n_players)  # un fuerte inicial por jugador
+        players = [Player(i, names[i]) for i in range(self.n_players)]
+        game = Game.new(
+            MapParams(width, height, forts, towns, n_players=self.n_players),
+            players,
+            self.victory_mode,
+        )
         self._host_rules = MatchRules(
             turn_seconds=int(self.f_turnsecs.value or 0),
             max_turns=int(self.f_maxturns.value or 50),
         )
         # El tope de turnos se hornea en el estado (viaja en el to_dict y lo
-        # evalúa el core de forma idéntica en ambos clientes).
+        # evalúa el core de forma idéntica en todos los clientes).
         game.turn_limit = self._host_rules.max_turns
         self._host_game = game
         return GameSetup(
             state=game.to_dict(),
             rules=self._host_rules.to_dict(),
-            names=[host_name, client_name],
+            names=names,
+            human_id=0,
         )
 
     def _on_net_event(self, event) -> None:
         if isinstance(event, Connected):
-            self.peer_name = event.peer_name
-            self.status = f"{event.peer_name} conectado. Marcá «Listo» para empezar."
+            if self.role == "host":
+                self.status = f"{event.name} se unió a la sala."
+            else:
+                self.status = f"Conectado a {event.name}. Esperando a los demás…"
         elif isinstance(event, GameReady):
             self._client_setup = event.setup
-        elif isinstance(event, ReadyChanged):
-            self.peer_ready = event.ready
+            self.status = "Todos conectados. Marcá «Listo» para empezar."
         elif isinstance(event, Rejected):
             self.status = f"Conexión rechazada: {event.reason}"
             self._teardown()
@@ -194,29 +207,27 @@ class MultiplayerScreen:
             setup = self._client_setup
             game = Game.from_dict(setup.state)
             rules = MatchRules.from_dict(setup.rules)
-            human_id = 1
+            human_id = setup.human_id
         self.net_start = NetGameStart(
             role=self.role,
             session=self.session,
             game=game,
             human_id=human_id,
             rules=rules,
-            peer_name=self.peer_name or "",
         )
-        self.status = "¡Listo! La partida en red comienza (integración: MP4)."
+        self.status = "¡Listo! La partida en red comienza."
         self.mode = "started"
 
     def _teardown(self) -> None:
         """Cierra server/session y vuelve al estado de no conectado."""
         if self.session is not None:
-            self.session.connection.close()
+            self.session.cancel("salió del lobby")
             self.session = None
         if self.server is not None:
             self.server.close()
             self.server = None
         self.role = None
-        self.local_ready = False
-        self.peer_ready = False
+        self._fed = set()
 
     # --- input -------------------------------------------------------------
 
@@ -258,6 +269,10 @@ class MultiplayerScreen:
             self.mode = "create"
         elif hit == "to_connect":
             self.mode = "connect"
+        elif hit == "n_players":
+            self.n_players = self.n_players % MAX_PLAYERS + 1
+            if self.n_players < 2:
+                self.n_players = 2
         elif hit == "victory":
             self.victory_mode = _next(VICTORY_MODES, self.victory_mode)
         elif hit == "map_size":
@@ -285,14 +300,17 @@ class MultiplayerScreen:
     def _start_hosting(self) -> None:
         try:
             port = int(self.f_hostport.value or DEFAULT_PORT)
-            self.server = Server(host="0.0.0.0", port=port)
+            self.server = Server(host="0.0.0.0", port=port, max_clients=self.n_players - 1)
         except OSError as exc:
             self.status = f"No se pudo abrir el puerto: {exc}"
             return
+        self.session = HostSession(
+            self.n_players, self.f_name.value or "Host", self._setup_provider
+        )
         self.role = "host"
         self.mode = "waiting"
-        self.local_ready = self.peer_ready = False
-        self.status = f"Esperando jugador en el puerto {self.server.port}…"
+        self._fed = set()
+        self.status = f"Esperando jugadores en el puerto {self.server.port}…"
 
     def _start_connecting(self) -> None:
         ip = self.f_ip.value.strip() or "127.0.0.1"
@@ -305,18 +323,14 @@ class MultiplayerScreen:
         self.session = ClientSession(conn, self.f_name.value or "Jugador")
         self.role = "client"
         self.mode = "waiting"
-        self.local_ready = self.peer_ready = False
         self.status = f"Conectando a {ip}…"
 
     def _toggle_ready(self) -> None:
         if self.session is None or self.session.state is not SessionState.LOBBY:
             return
-        self.local_ready = not self.local_ready
-        self.session.set_ready(self.local_ready)
+        self.session.set_ready(not self.session.local_ready)
 
     def _cancel_to_hub(self) -> None:
-        if self.session is not None:
-            self.session.cancel("salió del lobby")
         self._teardown()
         self.mode = "hub"
         self.status = ""
@@ -358,6 +372,9 @@ class MultiplayerScreen:
         y = self._field(surface, "name", "Tu nombre", self.f_name, area, y)
         width, height, _f, _t = MAP_SIZES[self.map_size]
         y = self._button(
+            surface, "n_players", f"Jugadores:  {self.n_players}", area, y, option=True,
+        )
+        y = self._button(
             surface, "victory",
             f"Victoria:  {VICTORY_LABELS[self.victory_mode]}", area, y, option=True,
         )
@@ -383,26 +400,45 @@ class MultiplayerScreen:
         self._button(surface, "back", "Volver (ESC)", area, y, option=True)
 
     def _draw_waiting(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 20
-        rows = [
-            f"Vos: {self.f_name.value or '—'}  {'(listo)' if self.local_ready else ''}",
-            f"Rival: {self.peer_name or 'esperando…'}"
-            f"  {'(listo)' if self.peer_ready else ''}",
-        ]
-        for text in rows:
-            label = self.font.render(text, True, theme.TEXT)
-            surface.blit(label, label.get_rect(midtop=(area.centerx, y)))
-            y += 44
+        y = area.y + 10
+        label = self.font.render("Sala de espera", True, theme.SELECTION)
+        surface.blit(label, label.get_rect(midtop=(area.centerx, y)))
+        y += 44
+        for row in self._roster_rows():
+            rendered = self.font.render(row, True, theme.TEXT)
+            surface.blit(rendered, rendered.get_rect(midtop=(area.centerx, y)))
+            y += 38
         y += 10
-        connected = (
+        in_lobby = (
             self.session is not None and self.session.state is SessionState.LOBBY
         )
-        if self.mode == "waiting" and connected:
-            ready_label = "Cancelar listo" if self.local_ready else "¡Listo!"
-            y = self._button(surface, "ready", ready_label, area, y)
-        if self.mode == "started":
-            y += 10
+        if self.mode == "waiting" and in_lobby:
+            ready = self.session.local_ready
+            y = self._button(
+                surface, "ready", "Cancelar listo" if ready else "¡Listo!", area, y
+            )
         self._button(surface, "cancel", "Cancelar / Volver", area, y + 10)
+
+    def _roster_rows(self) -> list[str]:
+        """Filas de la sala: jugadores conectados (con su estado) + lugares
+        libres que faltan ocupar."""
+        rows: list[str] = []
+        roster = self.session.roster() if self.session is not None else []
+        for pid, name, ready in roster:
+            tag = " (vos)" if self._is_local(pid) else ""
+            state = "listo" if ready else "esperando"
+            rows.append(f"J{pid + 1}: {name}{tag} — {state}")
+        if self.role == "host":
+            for _ in range(self.n_players - len(roster)):
+                rows.append("· lugar libre…")
+        elif not roster:
+            rows.append("Conectando con el host…")
+        return rows
+
+    def _is_local(self, pid: int) -> bool:
+        if self.role == "host":
+            return pid == 0
+        return self.session is not None and pid == self.session.human_id
 
     def _button(
         self, surface, bid, label, area, y, option: bool = False

@@ -63,32 +63,30 @@ class ScriptedBackend(LLMBackend):
 def _connect_pair(host_game: Game):
     """Host + cliente por loopback hasta PLAYING; devuelve sesiones y el setup
     que recibió el cliente (con el estado inicial del juego)."""
-    server = Server(host="127.0.0.1", port=0)
+    server = Server(host="127.0.0.1", port=0, max_clients=1)
     client_conn = connect("127.0.0.1", server.port, timeout=3.0)
-    deadline = time.time() + 3.0
-    while server.poll_connection() is None and time.time() < deadline:
-        time.sleep(0.005)
 
-    def provider(_peer):
-        return GameSetup(state=host_game.to_dict(), rules={}, names=["Host", "LLM"])
+    def provider(names):
+        return GameSetup(state=host_game.to_dict(), rules={}, names=list(names))
 
-    host = HostSession(server.poll_connection(), "Host", provider, config_hash=CONFIG_HASH)
+    host = HostSession(2, "Host", provider, config_hash=CONFIG_HASH)
     client = ClientSession(client_conn, "LLM", config_hash=CONFIG_HASH)
 
     client_setup = None
     host.set_ready(True)
-    client_ready = False
+    fed: set = set()
     deadline = time.time() + 3.0
     while time.time() < deadline:
+        for conn in server.poll_connections():
+            if conn not in fed:
+                fed.add(conn)
+                host.add_connection(conn)
         host.update()
         for ev in client.update():
             if isinstance(ev, GameReady):
                 client_setup = ev.setup
-            elif isinstance(ev, Started):
-                pass
-        if not client_ready and client.state is SessionState.LOBBY:
+        if client.state is SessionState.LOBBY and not client.local_ready:
             client.set_ready(True)
-            client_ready = True
         if host.state is SessionState.PLAYING and client.state is SessionState.PLAYING:
             break
         time.sleep(0.005)
@@ -135,6 +133,6 @@ def test_llm_player_plays_a_networked_game_in_sync():
                 break
         assert backend.calls > 0, "el LLM decidió órdenes al menos una vez"
     finally:
-        host_s.connection.close()
+        host_s.cancel()
         client_s.connection.close()
         server.close()

@@ -56,19 +56,36 @@ def new_game(choice: NewGameChoice) -> Game:
     """Crea una partida humano vs AI según lo elegido en el menú.
 
     Con `map_path` ("Cargar mapa") se usa el terreno+tropas de un `.wom` y el
-    menú impone jugadores y victoria; si no, se genera un mapa aleatorio.
+    menú impone victoria; la cantidad de jugadores la fija el mapa (sus dueños)
+    y los niveles de IA elegidos se reparten entre los rivales. Si no, se genera
+    un mapa aleatorio con un rival IA por cada nivel elegido.
     """
-    players = [
-        Player(HUMAN_ID, "Jugador"),
-        Player(1, f"AI ({choice.ai_level})", is_ai=True, ai_level=choice.ai_level),
-    ]
     if choice.map_path is not None:
+        doc = load_scenario(choice.map_path)
         return build_game(
-            load_scenario(choice.map_path),
-            players=players,
+            doc,
+            players=_players_for_map(doc, choice.ai_levels),
             victory_mode=choice.victory_mode,
         )
+    players = [Player(HUMAN_ID, "Jugador")]
+    for i, level in enumerate(choice.ai_levels, start=1):
+        players.append(Player(i, f"IA {i} ({level})", is_ai=True, ai_level=level))
     return Game.new(choice.map_params(), players, choice.victory_mode)
+
+
+def _players_for_map(doc, ai_levels: tuple[str, ...]) -> list[Player]:
+    """Jugadores para un mapa cargado: la cantidad la fija el mapa (el mayor id
+    de dueño presente en fuertes/tropas); el 0 es el humano y el resto IA, con
+    los niveles elegidos repartidos en orden (cíclico si faltan)."""
+    owners = {f.owner for f in doc.world.forts if f.owner >= 0}
+    owners |= {int(a["owner"]) for a in doc.army_specs if int(a["owner"]) >= 0}
+    n_players = max(owners) + 1 if owners else 2
+    levels = ai_levels or ("medio",)
+    players = [Player(HUMAN_ID, "Jugador")]
+    for i in range(1, n_players):
+        level = levels[(i - 1) % len(levels)]
+        players.append(Player(i, f"IA {i} ({level})", is_ai=True, ai_level=level))
+    return players
 
 
 def scenario_game(choice: ScenarioChoice) -> GameScreen:

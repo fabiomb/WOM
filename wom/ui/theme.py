@@ -6,7 +6,9 @@ FPS = 60
 
 PLAYER_COLORS = {
     0: (210, 70, 60),    # jugador humano: rojo
-    1: (70, 110, 210),   # AI: azul
+    1: (70, 110, 210),   # azul
+    2: (80, 175, 80),    # verde
+    3: (225, 195, 70),   # amarillo
 }
 NEUTRAL_COLOR = (140, 140, 140)
 
@@ -26,7 +28,12 @@ CLASH_FLASH = (255, 200, 90)      # destello exterior del choque de batalla
 CLASH_CORE = (255, 245, 210)      # núcleo del destello
 
 
-FLAG_ICONS = {0: "flag_red", 1: "flag_blue"}  # asset de bandera por dueño
+FLAG_ICONS = {  # asset de bandera por dueño (gris si neutral / desconocido)
+    0: "flag_red",
+    1: "flag_blue",
+    2: "flag_green",
+    3: "flag_yellow",
+}
 
 
 def player_color(owner: int) -> tuple[int, int, int]:

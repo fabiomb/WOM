@@ -23,6 +23,7 @@ import pygame
 from wom import __version__
 from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
+from wom.core.worldmap import MAX_PLAYERS
 from wom.persistence.savegame import list_saves, save_info
 from wom.persistence.scenario import list_maps, load_scenario, scenario_info
 from wom.persistence.settings import Settings
@@ -67,7 +68,8 @@ INK_HOVER = (146, 30, 18)
 
 @dataclass(frozen=True)
 class NewGameChoice:
-    ai_level: str
+    # Un nivel por rival IA (1..MAX_PLAYERS-1): la partida es humano + estas IAs.
+    ai_levels: tuple[str, ...]
     map_size: str
     victory_mode: VictoryMode
     seed: int | None = None
@@ -75,9 +77,15 @@ class NewGameChoice:
     # en vez de generar uno aleatorio; el tamaño se ignora.
     map_path: Path | None = None
 
+    @property
+    def n_players(self) -> int:
+        return 1 + len(self.ai_levels)
+
     def map_params(self) -> MapParams:
         width, height, forts, towns = MAP_SIZES[self.map_size]
-        return MapParams(width, height, forts, towns, self.seed)
+        # Al menos un fuerte inicial por jugador (los presets chicos traen 3).
+        forts = max(forts, self.n_players)
+        return MapParams(width, height, forts, towns, self.seed, n_players=self.n_players)
 
 
 @dataclass(frozen=True)
@@ -105,7 +113,10 @@ class MenuScreen:
         self._editing_folder: str | None = None  # buffer mientras se escribe
         self.mode = "main"
         self.action: NewGameChoice | LoadChoice | ScenarioChoice | str | None = None
-        self.ai_level = default_ai_level if default_ai_level in AI_LEVELS else "medio"
+        default_level = default_ai_level if default_ai_level in AI_LEVELS else "medio"
+        # Un nivel por rival IA; el largo de la lista es la cantidad de rivales
+        # (1..MAX_PLAYERS-1). Arranca con un solo rival (partida 1 vs 1 clásica).
+        self.ai_levels: list[str] = [default_level]
         self.map_size = "medio"
         self.victory_mode = VictoryMode.TOTAL
         self.seed = default_seed
@@ -219,8 +230,11 @@ class MenuScreen:
             elif hit == "quit":
                 self.action = "quit"
         elif self.mode == "new":
-            if hit == "ai_level":
-                self.ai_level = _next(AI_LEVELS, self.ai_level)
+            if hit == "n_opponents":
+                self._cycle_opponents()
+            elif hit.startswith("ai_level:"):
+                i = int(hit.split(":", 1)[1])
+                self.ai_levels[i] = _next(AI_LEVELS, self.ai_levels[i])
             elif hit == "map_size":
                 self.map_size = _next(list(MAP_SIZES), self.map_size)
             elif hit == "victory":
@@ -232,7 +246,7 @@ class MenuScreen:
                 self.mode = "pick_map"
             elif hit == "start":
                 self.action = NewGameChoice(
-                    self.ai_level, self.map_size, self.victory_mode, self.seed,
+                    tuple(self.ai_levels), self.map_size, self.victory_mode, self.seed,
                     map_path=self.loaded_map_path if self.map_source == "archivo" else None,
                 )
             elif hit == "back":
@@ -387,12 +401,14 @@ class MenuScreen:
             map_row = ("pick_file", f"Archivo:  {name}")
         else:
             map_row = ("map_size", f"Mapa:  {self.map_size} ({width}x{height})")
-        options = (
-            ("ai_level", f"Nivel de la AI:  {self.ai_level}"),
+        options = [("n_opponents", f"Rivales (IA):  {len(self.ai_levels)}")]
+        for i, level in enumerate(self.ai_levels):
+            options.append((f"ai_level:{i}", f"   IA {i + 1}:  {level}"))
+        options += [
             ("map_source", f"Origen del mapa:  {self.map_source}"),
             map_row,
             ("victory", f"Victoria:  {VICTORY_LABELS[self.victory_mode]}"),
-        )
+        ]
         for bid, label in options:
             y = self._button(surface, bid, label, area, y, option_style=True)
         hint_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
@@ -409,6 +425,15 @@ class MenuScreen:
             surface.blit(warn, warn.get_rect(center=(area.centerx, y + 18)))
             y += 42
         self._button(surface, "back", "Volver (ESC)", area, y, option_style=True)
+
+    def _cycle_opponents(self) -> None:
+        """Cicla la cantidad de rivales IA (1..MAX_PLAYERS-1), preservando los
+        niveles ya elegidos y agregando 'medio' al sumar uno."""
+        n = len(self.ai_levels) % (MAX_PLAYERS - 1) + 1
+        if n > len(self.ai_levels):
+            self.ai_levels.append("medio")
+        else:
+            del self.ai_levels[n:]
 
     def _draw_scenarios(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         y = area.y + 4

@@ -1,9 +1,9 @@
-"""Lockstep de punta a punta (sin pygame): dos `NetGame` sobre loopback.
+"""Lockstep de punta a punta (sin pygame): N `NetGame` sobre loopback.
 
-Cada lado tiene su propia copia del juego y solo conoce las órdenes de SU
-jugador (las decide una AI). El controlador intercambia órdenes y hashes; tras
-cada turno ambos juegos deben quedar idénticos y sin desincronización. Es la
-prueba que valida el corazón de MP4.
+Cada nodo tiene su propia copia del juego y solo conoce las órdenes de SU
+jugador (las decide una AI). El host junta todo y reparte el conjunto completo;
+tras cada turno todos los juegos deben quedar idénticos y sin divergencia. Es
+la prueba que valida el corazón del multiplayer.
 """
 
 import time
@@ -20,125 +20,140 @@ from wom.core.orders import (
 )
 from wom.core.victory import VictoryMode, VictoryResult
 from wom.net.lockstep import NetGame, canonical_order
-from wom.net.session import ClientSession, HostSession, SessionState, Started
-from wom.net.state_hash import state_digest
+from wom.net.protocol import GameSetup
+from wom.net.session import ClientSession, HostSession, SessionState
 from wom.net.transport import Server, connect
 
 CONFIG_HASH = "lockstep-test"
 
 
-def _new_game(seed: int) -> Game:
-    players = [
-        Player(0, "Host", is_ai=False),
-        Player(1, "Cliente", is_ai=False),
+def _new_game(seed: int, n_players: int = 2) -> Game:
+    players = [Player(i, f"P{i}", is_ai=False) for i in range(n_players)]
+    params = MapParams(22, 15, max(3, n_players), 4, seed, n_players=n_players)
+    return Game.new(params, players, VictoryMode.TOTAL)
+
+
+def _setup_provider(names):
+    return GameSetup(state={}, rules={}, names=list(names))
+
+
+def _playing_group(n_players: int = 2):
+    """Devuelve (server, host_session, [client_sessions]) ya en PLAYING."""
+    server = Server(host="127.0.0.1", port=0, max_clients=n_players - 1)
+    conns = [connect("127.0.0.1", server.port, timeout=3.0) for _ in range(n_players - 1)]
+    host = HostSession(n_players, "Host", _setup_provider, config_hash=CONFIG_HASH)
+    clients = [
+        ClientSession(conns[i], f"C{i + 1}", config_hash=CONFIG_HASH)
+        for i in range(n_players - 1)
     ]
-    return Game.new(MapParams(22, 15, 3, 4, seed), players, VictoryMode.TOTAL)
-
-
-def _setup_provider(_peer_name: str):
-    from wom.net.protocol import GameSetup
-
-    return GameSetup(state={}, rules={}, names=["Host", "Cliente"])
-
-
-def _playing_sessions():
-    """Devuelve (server, host_session, client_session) ya en PLAYING."""
-    server = Server(host="127.0.0.1", port=0)
-    client_conn = connect("127.0.0.1", server.port, timeout=3.0)
-    deadline = time.time() + 3.0
-    while server.poll_connection() is None and time.time() < deadline:
-        time.sleep(0.005)
-    host = HostSession(
-        server.poll_connection(), "Host", _setup_provider, config_hash=CONFIG_HASH
-    )
-    client = ClientSession(client_conn, "Cliente", config_hash=CONFIG_HASH)
-    # Handshake + ambos listos → PLAYING.
-    deadline = time.time() + 3.0
+    fed: set = set()
     host.set_ready(True)
-    client_ready = False
+    deadline = time.time() + 3.0
     while time.time() < deadline:
+        for conn in server.poll_connections():
+            if conn not in fed:
+                fed.add(conn)
+                host.add_connection(conn)
         host.update()
-        for ev in client.update():
-            if isinstance(ev, Started):
-                pass
-        if not client_ready and client.state is SessionState.LOBBY:
-            client.set_ready(True)
-            client_ready = True
-        if host.state is SessionState.PLAYING and client.state is SessionState.PLAYING:
+        for c in clients:
+            c.update()
+            if c.state is SessionState.LOBBY and not c.local_ready:
+                c.set_ready(True)
+        if host.state is SessionState.PLAYING and all(
+            c.state is SessionState.PLAYING for c in clients
+        ):
             break
         time.sleep(0.005)
-    assert host.state is SessionState.PLAYING and client.state is SessionState.PLAYING
-    return server, host, client
+    assert host.state is SessionState.PLAYING
+    assert all(c.state is SessionState.PLAYING for c in clients)
+    return server, host, clients
 
 
-def _drive_turn(host_net: NetGame, client_net: NetGame, ai0, ai1) -> None:
-    """Ambos envían sus órdenes y se bombea hasta que los dos resuelven el turno.
+def _close(server, host, clients):
+    host.cancel()
+    for c in clients:
+        c.connection.close()
+    server.close()
 
-    Hay que esperar a que AMBOS avancen, incluso en el último turno: cuando un
-    lado resuelve y la partida termina, el otro todavía tiene que procesar las
-    órdenes recibidas para resolver ese mismo turno (en la app real cada cliente
-    bombea la red cada frame, así que siempre lo hace)."""
-    host_net.submit_local_orders(ai0.decide_orders(host_net.game))
-    client_net.submit_local_orders(ai1.decide_orders(client_net.game))
+
+def _drive_turn(nets, ais) -> None:
+    """Todos envían sus órdenes y se bombea hasta que TODOS resuelven el turno."""
+    for net, ai in zip(nets, ais):
+        net.submit_local_orders(ai.decide_orders(net.game))
     deadline = time.time() + 3.0
-    h0, c0 = host_net.game.turn, client_net.game.turn
+    turns0 = [n.game.turn for n in nets]
     while time.time() < deadline:
-        host_net.update()
-        client_net.update()
-        if host_net.game.turn > h0 and client_net.game.turn > c0:
+        for n in nets:
+            n.update()
+        if all(n.game.turn > t for n, t in zip(nets, turns0)):
             return
         time.sleep(0.005)
-    raise AssertionError("el turno no se resolvió en ambos lados")
+    raise AssertionError("el turno no se resolvió en todos los nodos")
+
+
+def _nets(host_s, clients_s, games):
+    """NetGame por nodo: el host (0) y un cliente por cada rival."""
+    nets = [NetGame(host_s, games[0], human_id=0, is_host=True)]
+    for i, client_s in enumerate(clients_s, start=1):
+        nets.append(NetGame(client_s, games[i], human_id=i, is_host=False))
+    return nets
 
 
 def test_lockstep_two_players_stay_in_sync():
-    seed = 1
-    host_game = _new_game(seed)
-    client_game = _new_game(seed)
-    assert host_game.to_dict() == client_game.to_dict()
-
-    server, host_s, client_s = _playing_sessions()
-    host_net = NetGame(host_s, host_game, human_id=0, is_host=True)
-    client_net = NetGame(client_s, client_game, human_id=1, is_host=False)
-    ai0 = AIPlayer(0, level="facil")
-    ai1 = AIPlayer(1, level="facil")
-
+    games = [_new_game(1), _new_game(1)]
+    assert games[0].to_dict() == games[1].to_dict()
+    server, host_s, clients_s = _playing_group(2)
+    nets = _nets(host_s, clients_s, games)
+    ais = [AIPlayer(0, level="facil"), AIPlayer(1, level="facil")]
     try:
         for _ in range(60):
-            _drive_turn(host_net, client_net, ai0, ai1)
-            assert host_net.game.to_dict() == client_net.game.to_dict(), (
-                f"divergieron en el turno {host_net.game.turn}"
+            _drive_turn(nets, ais)
+            assert nets[0].game.to_dict() == nets[1].game.to_dict(), (
+                f"divergieron en el turno {nets[0].game.turn}"
             )
-            assert not host_net.desync and not client_net.desync
-            if host_net.phase.name == "ENDED":
+            assert not any(n.desync for n in nets)
+            if nets[0].phase.name == "ENDED":
                 break
-        # Hubo combate (camino con RNG) y ambos terminaron iguales.
-        assert host_net.game.battles_fought > 0
-        assert host_net.game.battles_fought == client_net.game.battles_fought
+        assert nets[0].game.battles_fought > 0
+        assert nets[0].game.battles_fought == nets[1].game.battles_fought
     finally:
-        host_s.connection.close()
-        client_s.connection.close()
-        server.close()
+        _close(server, host_s, clients_s)
+
+
+def test_lockstep_four_players_stay_in_sync():
+    games = [_new_game(3, n_players=4) for _ in range(4)]
+    assert all(g.to_dict() == games[0].to_dict() for g in games)
+    server, host_s, clients_s = _playing_group(4)
+    nets = _nets(host_s, clients_s, games)
+    ais = [AIPlayer(i, level="facil") for i in range(4)]
+    try:
+        for _ in range(40):
+            _drive_turn(nets, ais)
+            ref = nets[0].game.to_dict()
+            for n in nets[1:]:
+                assert n.game.to_dict() == ref, f"divergió en el turno {nets[0].game.turn}"
+            assert not any(n.desync for n in nets)
+            if nets[0].phase.name == "ENDED":
+                break
+    finally:
+        _close(server, host_s, clients_s)
 
 
 def test_consume_resolved_feeds_the_animation():
-    """Tras resolver, cada lado expone (resultado, snapshot) una sola vez."""
-    server, host_s, client_s = _playing_sessions()
-    host_net = NetGame(host_s, _new_game(1), human_id=0, is_host=True)
-    client_net = NetGame(client_s, _new_game(1), human_id=1, is_host=False)
-    ai0, ai1 = AIPlayer(0, level="facil"), AIPlayer(1, level="facil")
+    games = [_new_game(1), _new_game(1)]
+    server, host_s, clients_s = _playing_group(2)
+    nets = _nets(host_s, clients_s, games)
+    ais = [AIPlayer(0, level="facil"), AIPlayer(1, level="facil")]
     try:
-        _drive_turn(host_net, client_net, ai0, ai1)
-        resolved = host_net.consume_resolved()
+        _drive_turn(nets, ais)
+        resolved = nets[0].consume_resolved()
         assert resolved is not None
         result, pre_turn = resolved
         assert isinstance(result, VictoryResult)
-        assert isinstance(pre_turn, list) and pre_turn  # snapshot pre-turno
-        assert host_net.consume_resolved() is None  # se consume una sola vez
+        assert isinstance(pre_turn, list) and pre_turn
+        assert nets[0].consume_resolved() is None  # se consume una sola vez
     finally:
-        host_s.connection.close()
-        client_s.connection.close()
-        server.close()
+        _close(server, host_s, clients_s)
 
 
 def test_canonical_order_is_stable_regardless_of_input_order():
@@ -150,21 +165,20 @@ def test_canonical_order_is_stable_regardless_of_input_order():
         TransferTroopsOrder(source_id=7, target_id=3, composition=(("arquero", 1),)),
     ]
     assert canonical_order(a) == canonical_order(list(reversed(a)))
-    # Las reorganizaciones quedan antes que los movimientos.
     kinds = [type(o).__name__ for o in canonical_order(a)]
     assert kinds.index("MoveOrder") == len(kinds) - 1
 
 
 def test_resync_recovers_a_diverged_client():
-    """Si el cliente diverge (bug de determinismo), el host detecta el mismatch
-    de hash, le reenvía su estado autoritativo (StateSync) y el cliente lo
-    adopta, volviendo a quedar idéntico."""
-    server, host_s, client_s = _playing_sessions()
-    host_net = NetGame(host_s, _new_game(1), human_id=0, is_host=True)
-    client_net = NetGame(client_s, _new_game(1), human_id=1, is_host=False)
+    """Si el cliente diverge, el host detecta el mismatch de hash, le reenvía su
+    estado autoritativo (StateSync) y el cliente lo adopta, volviendo a quedar
+    idéntico."""
+    games = [_new_game(1), _new_game(1)]
+    server, host_s, clients_s = _playing_group(2)
+    nets = _nets(host_s, clients_s, games)
+    host_net, client_net = nets
     try:
-        # Fuerza una divergencia antes de resolver el turno.
-        client_net.game.players[0].food += 999
+        client_net.game.players[0].food += 999  # fuerza divergencia
         assert host_net.game.to_dict() != client_net.game.to_dict()
 
         host_net.submit_local_orders([])
@@ -179,20 +193,18 @@ def test_resync_recovers_a_diverged_client():
         assert client_net.resynced  # el cliente adoptó el estado del host
         assert client_net.game.to_dict() == host_net.game.to_dict()
     finally:
-        host_s.connection.close()
-        client_s.connection.close()
-        server.close()
+        _close(server, host_s, clients_s)
 
 
-def test_peer_orders_referencing_own_armies_are_dropped():
-    """El validador descarta órdenes del par que toquen ejércitos propios."""
-    server, host_s, client_s = _playing_sessions()
-    host_net = NetGame(host_s, _new_game(1), human_id=0, is_host=True)
+def test_peer_orders_referencing_others_armies_are_dropped():
+    """El validador del host descarta órdenes de un rival que toquen ejércitos
+    que no son suyos."""
+    games = [_new_game(1), _new_game(1)]
+    server, host_s, clients_s = _playing_group(2)
+    host_net = _nets(host_s, clients_s, games)[0]
     try:
-        own_army = host_net.game.armies_of(0)[0]  # del host (no del par)
-        peer = [MoveOrder(army_id=own_army.id, path=((0, 0),))]
-        assert host_net._validate_peer(peer) == []
+        host_army = host_net.game.armies_of(0)[0]  # del host, no del cliente
+        peer = [MoveOrder(army_id=host_army.id, path=((0, 0),))]
+        assert host_net._validate_owned(peer, player_id=1) == []
     finally:
-        host_s.connection.close()
-        client_s.connection.close()
-        server.close()
+        _close(server, host_s, clients_s)

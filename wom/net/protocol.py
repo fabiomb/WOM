@@ -50,11 +50,24 @@ class Welcome:
 
 @dataclass(frozen=True)
 class GameSetup:
-    """host→cliente: estado inicial completo (`Game.to_dict()`) + reglas."""
+    """host→cliente: estado inicial completo (`Game.to_dict()`) + reglas.
+
+    `human_id` es el id de jugador que el host le asignó a este cliente (1..N-1;
+    el host es 0). Todos los clientes reciben el MISMO `state` autoritativo, solo
+    cambia su `human_id`.
+    """
 
     state: dict
     rules: dict
     names: list[str]
+    human_id: int = 1
+
+
+@dataclass(frozen=True)
+class Lobby:
+    """host→clientes: estado de la sala (id, nombre y listo de cada jugador)."""
+
+    players: list  # [[player_id, name, ready], ...]
 
 
 @dataclass(frozen=True)
@@ -71,10 +84,22 @@ class Start:
 
 @dataclass(frozen=True)
 class Orders:
-    """ambos: las órdenes del jugador para un turno (ya codificadas a dict)."""
+    """cliente→host: las órdenes del jugador para un turno (codificadas a dict).
+    El host las atribuye al jugador por la conexión de la que llegan."""
 
     turn: int
     orders: list[dict]
+
+
+@dataclass(frozen=True)
+class TurnOrders:
+    """host→clientes: el conjunto completo de órdenes del turno (todas las
+    facciones), una vez que el host las juntó. Cada nodo corre exactamente este
+    bundle, así el lockstep no puede divergir por el orden de llegada.
+    `orders` es una lista de pares `[player_id, [order_dicts]]`."""
+
+    turn: int
+    orders: list
 
 
 @dataclass(frozen=True)
@@ -127,9 +152,11 @@ Message = (
     Hello
     | Welcome
     | GameSetup
+    | Lobby
     | Ready
     | Start
     | Orders
+    | TurnOrders
     | Hash
     | StateSync
     | Chat
@@ -145,9 +172,11 @@ _MESSAGE_TYPES: dict[str, type] = {
         Hello,
         Welcome,
         GameSetup,
+        Lobby,
         Ready,
         Start,
         Orders,
+        TurnOrders,
         Hash,
         StateSync,
         Chat,

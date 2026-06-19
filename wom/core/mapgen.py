@@ -7,8 +7,8 @@ ríos serpenteantes que cruzan el mapa dejando vados transitables para no
 cortar la conectividad.
 
 Garantías que cumple el generador:
-- Los fuertes iniciales de los jugadores 0 y 1 quedan en bandas opuestas
-  del mapa (izquierda/derecha).
+- Cada jugador arranca con su fuerte inicial en una zona alejada del resto
+  (2 jugadores: bandas izquierda/derecha; 3-4: esquinas distintas).
 - Todos los fuertes y pueblos son alcanzables entre sí (conectividad
   verificada por flood-fill sobre tiles transitables).
 - Misma seed + mismos parámetros => mismo mapa (determinismo).
@@ -24,7 +24,7 @@ import random
 from collections import deque
 from dataclasses import dataclass
 
-from wom.core.worldmap import Coord, Fort, Terrain, Town, WorldMap
+from wom.core.worldmap import MAX_PLAYERS, Coord, Fort, Terrain, Town, WorldMap
 
 # Proporción objetivo de cada terreno sobre el total de tiles (el resto
 # queda como llanura).
@@ -55,12 +55,15 @@ class MapParams:
     n_forts: int = 4   # total, incluye el fuerte inicial de cada jugador
     n_towns: int = 6
     seed: int | None = None
+    n_players: int = 2  # jugadores; cada uno arranca con su fuerte inicial
 
     def __post_init__(self) -> None:
         if self.width < 10 or self.height < 10:
             raise ValueError("el mapa debe ser de al menos 10x10")
-        if self.n_forts < 2:
-            raise ValueError("se necesitan al menos 2 fuertes (uno por jugador)")
+        if not 2 <= self.n_players <= MAX_PLAYERS:
+            raise ValueError(f"la partida admite de 2 a {MAX_PLAYERS} jugadores")
+        if self.n_forts < self.n_players:
+            raise ValueError("se necesita al menos un fuerte inicial por jugador")
 
 
 def generate_map(params: MapParams, rng: random.Random) -> WorldMap:
@@ -233,16 +236,17 @@ def _place_features(world: WorldMap, params: MapParams, rng: random.Random) -> b
     """Coloca fuertes y pueblos; devuelve False si no encontró lugar."""
     taken: list[Coord] = []
 
-    def pick(x_min: int, x_max: int) -> Coord | None:
+    def pick(box: tuple[int, int, int, int]) -> Coord | None:
+        x_min, x_max, y_min, y_max = box
         for _ in range(200):
-            pos = (rng.randrange(x_min, x_max), rng.randrange(world.height))
+            pos = (rng.randrange(x_min, x_max), rng.randrange(y_min, y_max))
             if all(_manhattan(pos, t) >= MIN_FEATURE_DISTANCE for t in taken):
                 return pos
         return None
 
-    band = max(2, world.width // 5)
-    # Fuertes iniciales de los jugadores, en bandas opuestas.
-    player_positions = [pick(0, band), pick(world.width - band, world.width)]
+    whole = (0, world.width, 0, world.height)
+    # Fuertes iniciales de los jugadores, repartidos en zonas alejadas.
+    player_positions = [pick(zone) for zone in _player_zones(world, params.n_players)]
     if None in player_positions:
         return False
     for player_id, pos in enumerate(player_positions):
@@ -250,14 +254,14 @@ def _place_features(world: WorldMap, params: MapParams, rng: random.Random) -> b
         world.forts.append(Fort(position=pos, owner=player_id))
 
     # Resto de fuertes (neutrales) y pueblos, en cualquier parte.
-    for _ in range(params.n_forts - 2):
-        pos = pick(0, world.width)
+    for _ in range(params.n_forts - params.n_players):
+        pos = pick(whole)
         if pos is None:
             return False
         taken.append(pos)
         world.forts.append(Fort(position=pos))
     for _ in range(params.n_towns):
-        pos = pick(0, world.width)
+        pos = pick(whole)
         if pos is None:
             return False
         taken.append(pos)
@@ -267,6 +271,27 @@ def _place_features(world: WorldMap, params: MapParams, rng: random.Random) -> b
     for x, y in taken:
         world.tiles[y][x] = Terrain.PLAINS
     return True
+
+
+def _player_zones(world: WorldMap, n_players: int) -> list[tuple[int, int, int, int]]:
+    """Cajas (x_min, x_max, y_min, y_max) donde nace el fuerte inicial de cada
+    jugador, repartidas para que arranquen lo más separados posible.
+
+    Con 2 jugadores son las bandas izquierda/derecha de siempre (preserva el
+    layout clásico y el determinismo de seeds existentes); con 3-4, esquinas.
+    """
+    bx = max(2, world.width // 5)
+    by = max(2, world.height // 5)
+    w, h = world.width, world.height
+    if n_players <= 2:
+        return [(0, bx, 0, h), (w - bx, w, 0, h)][:n_players]
+    corners = [
+        (0, bx, 0, by),          # superior izquierda
+        (w - bx, w, 0, by),      # superior derecha
+        (0, bx, h - by, h),      # inferior izquierda
+        (w - bx, w, h - by, h),  # inferior derecha
+    ]
+    return corners[:n_players]
 
 
 def _is_fully_connected(world: WorldMap) -> bool:

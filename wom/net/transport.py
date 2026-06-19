@@ -5,8 +5,9 @@ mensajes (`FrameDecoder`) y los deja en una cola que el loop de la app drena
 una vez por frame (`poll`), así la red nunca bloquea el render. `send` es
 thread-safe. Cuando el par cierra o hay error de red, `alive` pasa a False.
 
-`Server` escucha en segundo plano y acepta **una** conexión (host ↔ cliente,
-v0.4.0). `connect` es el lado cliente. Nada de esto importa pygame.
+`Server` escucha en segundo plano y acepta hasta `max_clients` conexiones (una
+por cada rival que se une a la partida del host). `connect` es el lado cliente.
+Nada de esto importa pygame.
 """
 
 from __future__ import annotations
@@ -97,14 +98,17 @@ class Connection:
 
 
 class Server:
-    """Escucha en segundo plano y acepta una sola conexión entrante."""
+    """Escucha en segundo plano y acepta hasta `max_clients` conexiones."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = DEFAULT_PORT) -> None:
+    def __init__(
+        self, host: str = "0.0.0.0", port: int = DEFAULT_PORT, max_clients: int = 1
+    ) -> None:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind((host, port))
-        self._sock.listen(1)
-        self._connection: Connection | None = None
+        self._sock.listen(max(1, max_clients))
+        self._max_clients = max(1, max_clients)
+        self._connections: list[Connection] = []
         self._lock = threading.Lock()
         self._open = True
         self._thread = threading.Thread(target=self._accept_loop, daemon=True)
@@ -116,24 +120,34 @@ class Server:
         return self._sock.getsockname()[1]
 
     def _accept_loop(self) -> None:
-        try:
-            client, _addr = self._sock.accept()
-        except OSError:
-            return  # se cerró el server mientras esperaba
+        while True:
+            with self._lock:
+                if not self._open or len(self._connections) >= self._max_clients:
+                    return
+            try:
+                client, _addr = self._sock.accept()
+            except OSError:
+                return  # se cerró el server mientras esperaba
+            with self._lock:
+                if self._open and len(self._connections) < self._max_clients:
+                    self._connections.append(Connection(client))
+                else:
+                    client.close()
+                    return
+
+    def poll_connections(self) -> list[Connection]:
+        """Todas las conexiones aceptadas hasta el momento (copia de la lista)."""
         with self._lock:
-            if self._open:
-                self._connection = Connection(client)
-            else:
-                client.close()
+            return list(self._connections)
 
     def poll_connection(self) -> Connection | None:
-        """La conexión aceptada (o None mientras no entró nadie)."""
+        """La primera conexión aceptada (o None). Atajo para el caso de 1 rival."""
         with self._lock:
-            return self._connection
+            return self._connections[0] if self._connections else None
 
     def close(self) -> None:
-        """Deja de aceptar y cierra el socket de escucha (no la conexión ya
-        aceptada, que es responsabilidad de quien la consumió)."""
+        """Deja de aceptar y cierra el socket de escucha (no las conexiones ya
+        aceptadas, que son responsabilidad de quien las consumió)."""
         with self._lock:
             self._open = False
         try:

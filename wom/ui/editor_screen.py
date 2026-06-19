@@ -27,7 +27,7 @@ from wom.core.config import load_game_config
 from wom.core.game import Game, Player
 from wom.core.mapgen import MapParams, generate_map
 from wom.core.victory import VictoryMode
-from wom.core.worldmap import NEUTRAL, Fort, Terrain, Town, WorldMap
+from wom.core.worldmap import MAX_PLAYERS, NEUTRAL, Fort, Terrain, Town, WorldMap
 from wom.persistence.scenario import (
     ScenarioDoc,
     list_maps,
@@ -50,9 +50,17 @@ TERRAIN_TOOLS: list[tuple[Terrain, str]] = [
     (Terrain.BRIDGE_H, "Puente E-O"),
     (Terrain.BRIDGE_V, "Puente N-S"),
 ]
-OWNERS = [NEUTRAL, 0, 1]
-OWNER_LABELS = {NEUTRAL: "Neutral", 0: "Jugador 1", 1: "Jugador 2"}
+OWNERS = [NEUTRAL, *range(MAX_PLAYERS)]
+OWNER_LABELS = {NEUTRAL: "Neutral", **{i: f"Jugador {i + 1}" for i in range(MAX_PLAYERS)}}
 SWATCH = 60  # lado de cada miniatura de la paleta
+
+
+def _editor_players() -> list[Player]:
+    """Jugadores del buffer de edición: el humano más rivales IA hasta el tope,
+    para que la paleta admita cualquier dueño 0..MAX_PLAYERS-1."""
+    return [Player(0, "Jugador")] + [
+        Player(i, f"Rival {i}", is_ai=True, ai_level="medio") for i in range(1, MAX_PLAYERS)
+    ]
 
 
 def _blank_game(width: int, height: int) -> Game:
@@ -62,8 +70,7 @@ def _blank_game(width: int, height: int) -> Game:
         height=height,
         tiles=[[Terrain.PLAINS] * width for _ in range(height)],
     )
-    players = [Player(0, "Jugador"), Player(1, "Rival", is_ai=True, ai_level="medio")]
-    return Game.from_setup(world, players, [], VictoryMode.TOTAL)
+    return Game.from_setup(world, _editor_players(), [], VictoryMode.TOTAL)
 
 
 class EditorScreen:
@@ -350,8 +357,7 @@ class EditorScreen:
         width, height, forts, towns = MAP_SIZES[self.size]
         params = MapParams(width, height, forts, towns, seed=None)
         world = generate_map(params, self.game.rng)
-        players = [Player(0, "Jugador"), Player(1, "Rival", is_ai=True, ai_level="medio")]
-        self.game = Game.from_setup(world, players, [], self.game.victory_mode)
+        self.game = Game.from_setup(world, _editor_players(), [], self.game.victory_mode)
         self._rebuild_renderer()
         self._notify("Mapa aleatorio generado")
 
@@ -462,13 +468,22 @@ class EditorScreen:
         self._save_to(None)
 
     def _build_doc(self) -> ScenarioDoc:
-        """Documento `.wom` a partir del mapa actual y la metadata guardada."""
+        """Documento `.wom` a partir del mapa actual y la metadata guardada.
+
+        La cantidad de jugadores la fijan los dueños presentes en el mapa (el
+        mayor id usado en fuertes/tropas, mínimo 2): así un mapa de 2 bandos
+        guarda 2 jugadores y uno de 4, cuatro.
+        """
+        owners = {f.owner for f in self.game.world.forts if f.owner >= 0}
+        owners |= {a.owner for a in self.game.armies if a.owner >= 0}
+        n_players = max(max(owners) + 1, 2) if owners else 2
+        players = [Player(0, "Jugador")] + [
+            Player(i, f"Rival {i}", is_ai=True, ai_level=self.doc_meta["ai_level"])
+            for i in range(1, n_players)
+        ]
         return ScenarioDoc(
             world=self.game.world,
-            players=[
-                Player(0, "Jugador"),
-                Player(1, "Rival", is_ai=True, ai_level=self.doc_meta["ai_level"]),
-            ],
+            players=players,
             army_specs=[
                 {
                     "owner": a.owner,

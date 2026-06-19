@@ -1,13 +1,22 @@
-# WOM — Diseño de Multiplayer (v0.4.0)
+# WOM — Diseño de Multiplayer
+
+> **Actualización (4 jugadores):** el multijugador ya soporta **2 a 4 jugadores
+> en free-for-all** con **topología estrella**: el host (jugador 0) es la
+> autoridad y hace de relay; los clientes solo hablan con él. Cada turno los
+> clientes mandan sus órdenes al host, el host las junta con las propias y
+> reparte el conjunto completo (`TurnOrders`) a todos, que corren el bundle
+> idéntico (lockstep determinista, el host valida y resincroniza). Lo de abajo
+> describe el diseño original de 2 jugadores; la metodología (lockstep + host
+> autoritativo) y el protocolo se generalizaron, no se reemplazaron.
+> Limitación v1: si alguien se desconecta, la partida termina para todos.
 
 Documento de diseño del modo multijugador, derivado del punto 11 de
-`especificaciones.md`. Estado: **propuesta de diseño para revisión** (todavía
-sin implementar). Define la metodología, la arquitectura, el protocolo de red,
-la integración con el core y un plan de implementación por fases.
+`especificaciones.md`. Define la metodología, la arquitectura, el protocolo de
+red, la integración con el core y un plan de implementación por fases.
 
-Objetivo de la versión **0.4.0**: dos jugadores humanos enfrentados por red
-(LAN o IP directa), uno hospeda (host) y otro se conecta (cliente). Sin AI en
-la partida en red (v0.4.0); la AI se mantiene para el modo de un jugador.
+Objetivo original de la versión **0.4.0**: dos jugadores humanos enfrentados por
+red (LAN o IP directa), uno hospeda (host) y otro se conecta (cliente). Sin AI
+en la partida en red; la AI se mantiene para el modo de un jugador.
 
 ---
 
