@@ -62,6 +62,18 @@ def test_castillo_usa_fondo_de_fuerte(screen):
     bs.draw(screen)  # render con fondo de fuerte sin lanzar
 
 
+def test_fuerte_inclina_la_grilla_y_to_cell_invierte_to_px(screen):
+    bs = BattleScreen(_fort_battle(), human_owner=0)
+    assert bs._shear > 0  # el fuerte inclina la grilla (perspectiva del patio)
+    # Los clics siguen siendo correctos: to_cell deshace el shear de to_px.
+    for cx, cy in [(3.0, 2.0), (8.0, 6.0), (5.5, 5.5)]:
+        px, py = bs.to_px(cx, cy)
+        rx, ry = bs.to_cell(px, py)
+        assert abs(rx - cx) < 0.1 and abs(ry - cy) < 0.1
+    # El campo abierto no se inclina.
+    assert BattleScreen(_battle(), human_owner=0)._shear == 0.0
+
+
 def test_render_y_pasos(screen):
     bs = BattleScreen(_battle(), human_owner=0)
     bs.update()  # primer frame: fija el reloj

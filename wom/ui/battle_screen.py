@@ -41,6 +41,7 @@ OPEN_FIELD_BG = "fondo-batalla-terreno"   # fondo de campo abierto (pradera)
 FORT_BG = "fondo-batalla-fuerte"          # fondo del asalto a fuerte (muralla+puerta)
 HORIZON_OPEN = 0.40   # campo abierto: el horizonte termina ~40% (pradera abajo)
 HORIZON_FORT = 0.33   # fuerte: el terreno arranca ~1/3 (cielo arriba)
+SHEAR_FORT = 0.32     # inclinación por perspectiva del patio del fuerte (0 = sin)
 DEPTH_FAR = 0.8       # escala de las tropas más lejanas (arriba, cerca del horizonte)
 DEPTH_NEAR = 1.0      # escala de las más cercanas al observador (abajo)
 SPRITE_SCALE = 1.0    # tamaño del sprite respecto de la celda (más grande = más legible)
@@ -111,6 +112,9 @@ class BattleScreen:
         self._bg_src = load_image(FORT_BG if is_fort else OPEN_FIELD_BG)
         self.has_bg = self._bg_src is not None
         self._horizon = HORIZON_FORT if is_fort else HORIZON_OPEN
+        # Shear de perspectiva: inclina la grilla del fuerte para alinear patio
+        # y muralla con el dibujo (0 en campo abierto / sin fondo).
+        self._shear = SHEAR_FORT if (is_fort and self.has_bg) else 0.0
         self._bg_scaled: pygame.Surface | None = None
         # Efectos de flecha en vuelo (solo visual): cada uno
         # {"from","to","t0","dur"}. Se generan cuando un arquero ataca.
@@ -147,18 +151,29 @@ class BattleScreen:
         else:
             band_top = HUD_H
             band_h = area_h
-        self.cell = min(w / self.battle.field_w, band_h / self.battle.field_h)
-        self.ox = (w - self.cell * self.battle.field_w) / 2
-        self.oy = band_top + (band_h - self.cell * self.battle.field_h) / 2
+        fh = self.battle.field_h
+        # Inclinación por perspectiva (solo fuerte): la grilla se ensancha
+        # `_shear * fh` celdas (arriba a la derecha), así que la celda y el
+        # centrado horizontal la contemplan.
+        eff_w = self.battle.field_w + self._shear * fh
+        self.cell = min(w / eff_w, band_h / fh)
+        self.ox = (w - self.cell * eff_w) / 2
+        self.oy = band_top + (band_h - self.cell * fh) / 2
         self._auto_btn = pygame.Rect(w - 230, 12, 210, HUD_H - 24)
         # Botón "Comenzar" (solo en preparación), a la izquierda del de auto.
         self._start_btn = pygame.Rect(w - 470, 12, 220, HUD_H - 24)
 
     def to_px(self, x: float, y: float) -> tuple[int, int]:
-        return int(self.ox + x * self.cell), int(self.oy + y * self.cell)
+        # Shear por profundidad (fuerte): arriba/lejos corre a la derecha para
+        # seguir la perspectiva del patio; 0 en campo abierto.
+        sx = x + self._shear * (self.battle.field_h - y)
+        return int(self.ox + sx * self.cell), int(self.oy + y * self.cell)
 
     def to_cell(self, px: float, py: float) -> tuple[float, float]:
-        return (px - self.ox) / self.cell, (py - self.oy) / self.cell
+        # Inversa de to_px: primero la fila (y), luego deshace el shear en x.
+        cy = (py - self.oy) / self.cell
+        cx = (px - self.ox) / self.cell - self._shear * (self.battle.field_h - cy)
+        return cx, cy
 
     def _depth(self, cell_y: float) -> float:
         """Escala por profundidad: 0.8 arriba (lejos) → 1.0 abajo (cerca).
