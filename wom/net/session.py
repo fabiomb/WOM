@@ -122,6 +122,23 @@ class ChatReceived:
 
 
 @dataclass(frozen=True)
+class PlayerLeft:
+    """host: un rival se cayó en plena partida. El slot queda libre para que
+    vuelva; mientras tanto la IA lo controla (lo decide el `NetGame`)."""
+
+    player_id: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class PlayerRejoined:
+    """host: un rival que se había caído volvió a la partida (retoma su lugar)."""
+
+    player_id: int
+    name: str
+
+
+@dataclass(frozen=True)
 class Disconnected:
     """La conexión se cerró (par caído, host canceló, error). `player_id` indica
     qué rival cayó (host); None si fue la propia conexión del cliente."""
@@ -140,6 +157,8 @@ Event = (
     | HashReceived
     | StateSyncReceived
     | ChatReceived
+    | PlayerLeft
+    | PlayerRejoined
     | Disconnected
 )
 
@@ -169,6 +188,7 @@ class HostSession:
         name: str,
         setup_provider: Callable[[list[str]], GameSetup],
         config_hash: str | None = None,
+        server=None,
     ) -> None:
         self.n_players = n_players
         self.name = name
@@ -176,22 +196,32 @@ class HostSession:
         self._setup_provider = setup_provider
         self._config_hash = config_hash if config_hash is not None else config_fingerprint()
         self.local_ready = False
+        self._server = server  # si está, update() saca de él las conexiones nuevas
+        self._seen_conns: set = set()
         self._pending: list[Connection] = []      # conexiones sin Hello aún
         self._clients: dict[int, _ClientLink] = {}  # player_id → link
+        # Jugadores caídos: player_id → último nombre. El slot queda reservado
+        # para que vuelvan (reconexión); mientras tanto la IA los controla.
+        self._absent: dict[int, str] = {}
         self._next_id = 1
         self._setup_sent = False
+        self._base_setup: GameSetup | None = None  # setup inicial (para rejoins en lobby)
+        # Lo setea el NetGame del host: () -> (estado_vivo, nombres), para armar
+        # el GameSetup de un jugador que reconecta en plena partida.
+        self.live_state_provider: Callable[[], tuple[dict, list[str]]] | None = None
         self.peer_name = ""  # sin uso en el host (lo deriva NetGame)
 
     # --- alta de conexiones / consultas ---------------------------------
 
     def add_connection(self, conn: Connection) -> None:
-        """Registra una conexión entrante (aún sin handshake). Idempotente: una
-        conexión ya pendiente o ya promovida a cliente no se vuelve a agregar."""
+        """Registra una conexión entrante (aún sin handshake). Idempotente: cada
+        conexión se procesa una sola vez."""
         if self.state is SessionState.CLOSED:
             conn.close()
             return
-        if conn in self._pending or any(link.conn is conn for link in self._clients.values()):
+        if conn in self._seen_conns:
             return
+        self._seen_conns.add(conn)
         self._pending.append(conn)
 
     @property
@@ -225,6 +255,10 @@ class HostSession:
         """Chat del host: a todos los clientes (el host lo ve por NetGame)."""
         self._broadcast(Chat(name=self.name, text=text, ts=time.time()))
 
+    def send_system_chat(self, text: str) -> None:
+        """Aviso del sistema (caída/regreso de un jugador) a todos los clientes."""
+        self._broadcast(Chat(name="Sistema", text=text, ts=time.time()))
+
     def cancel(self, reason: str = "cerrada por el host") -> None:
         """Cierra la sesión avisando a todos (Bye) y corta las conexiones."""
         if self.state is not SessionState.CLOSED:
@@ -233,6 +267,8 @@ class HostSession:
             link.conn.close()
         for conn in self._pending:
             conn.close()
+        if self._server is not None:
+            self._server.close()
         self.state = SessionState.CLOSED
 
     # --- bucle de actualización -----------------------------------------
@@ -241,19 +277,35 @@ class HostSession:
         events: list[Event] = []
         if self.state is SessionState.CLOSED:
             return events
+        if self._server is not None:
+            for conn in self._server.poll_connections():
+                self.add_connection(conn)
         self._poll_pending(events)
         for player_id, link in list(self._clients.items()):
+            if player_id not in self._clients:
+                continue  # se cayó por Bye en este mismo pase
             for message in link.conn.poll():
                 self._handle_client(player_id, link, message, events)
                 if self.state is SessionState.CLOSED:
                     return events
-            if not link.conn.alive and self.state is not SessionState.CLOSED:
-                events.append(Disconnected(link.conn.error or "conexión perdida", player_id))
-                self.cancel("un jugador se desconectó")
-                return events
+                if player_id not in self._clients:
+                    break
+            if player_id in self._clients and not link.conn.alive:
+                self._drop_client(player_id, link.conn.error or "conexión perdida", events)
         self._maybe_send_setup()
         self._maybe_start(events)
         return events
+
+    def _drop_client(self, player_id: int, reason: str, events: list[Event]) -> None:
+        """Saca a un cliente caído pero NO cierra la sesión: deja el slot
+        reservado (ausente) para que vuelva; la IA lo controla mientras tanto."""
+        link = self._clients.pop(player_id, None)
+        if link is None:
+            return
+        link.conn.close()
+        self._absent[player_id] = link.name
+        events.append(PlayerLeft(player_id, reason))
+        self._broadcast_lobby()
 
     def _poll_pending(self, events: list[Event]) -> None:
         for conn in list(self._pending):
@@ -267,13 +319,16 @@ class HostSession:
 
     def _accept(self, conn: Connection, hello: Hello, events: list[Event]) -> None:
         self._pending.remove(conn)
-        if len(self._clients) >= self.n_players - 1:
-            conn.send(Welcome(accepted=False, reason="la partida está llena", name=self.name))
-            conn.close()
-            return
         reason = self._reject_reason(hello)
         if reason is not None:
             conn.send(Welcome(accepted=False, reason=reason, name=self.name))
+            conn.close()
+            return
+        if self._absent:  # reconexión: retoma el slot de un jugador caído
+            self._readmit(conn, hello, events)
+            return
+        if len(self._clients) >= self.n_players - 1:
+            conn.send(Welcome(accepted=False, reason="la partida está llena", name=self.name))
             conn.close()
             return
         player_id = self._next_id
@@ -281,6 +336,30 @@ class HostSession:
         self._clients[player_id] = _ClientLink(conn, hello.name)
         conn.send(Welcome(accepted=True, reason="", name=self.name))
         events.append(Connected(player_id, hello.name))
+        self._broadcast_lobby()
+
+    def _readmit(self, conn: Connection, hello: Hello, events: list[Event]) -> None:
+        """Readmite a un jugador que se había caído (id ausente más bajo)."""
+        player_id = min(self._absent)
+        self._absent.pop(player_id)
+        self._clients[player_id] = _ClientLink(conn, hello.name)
+        conn.send(Welcome(accepted=True, reason="", name=self.name))
+        if self.state is SessionState.PLAYING and self.live_state_provider is not None:
+            # En plena partida: arranca directo con el estado vivo del host.
+            state, names = self.live_state_provider()
+            rules = self._base_setup.rules if self._base_setup is not None else {}
+            conn.send(GameSetup(state=state, rules=rules, names=names, human_id=player_id))
+            conn.send(Start())
+            events.append(PlayerRejoined(player_id, hello.name))
+        elif self._setup_sent and self._base_setup is not None:
+            # Volvió durante el lobby: reenvía el setup inicial.
+            base = self._base_setup
+            conn.send(
+                GameSetup(state=base.state, rules=base.rules, names=base.names, human_id=player_id)
+            )
+            events.append(Connected(player_id, hello.name))
+        else:
+            events.append(Connected(player_id, hello.name))
         self._broadcast_lobby()
 
     def _reject_reason(self, hello: Hello) -> str | None:
@@ -299,8 +378,8 @@ class HostSession:
         self, player_id: int, link: _ClientLink, message, events: list[Event]
     ) -> None:
         if isinstance(message, Bye):
-            events.append(Disconnected(message.reason, player_id))
-            self.cancel("un jugador salió de la partida")
+            # Salida ordenada de un cliente: como una caída, deja el slot libre.
+            self._drop_client(player_id, message.reason, events)
         elif isinstance(message, Ready) and self.state is SessionState.LOBBY:
             link.ready = message.ready
             self._broadcast_lobby()
@@ -317,6 +396,7 @@ class HostSession:
         if self._setup_sent or len(self._clients) < self.n_players - 1:
             return
         base = self._setup_provider(self.names)
+        self._base_setup = base
         for player_id, link in self._clients.items():
             link.conn.send(
                 GameSetup(

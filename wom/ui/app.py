@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pygame
 
+from wom.ai.ai_player import AIPlayer, choose_personality
+from wom.core.config import load_ai_personalities
 from wom.core.game import Game, Player
 from wom.core.victory import VictoryMode
 from wom.net.lockstep import NetGame
@@ -97,13 +99,28 @@ def scenario_game(choice: ScenarioChoice) -> GameScreen:
 
 
 def _start_net_game(net_start) -> GameScreen:
-    """Arranca la partida en red a partir del lobby (NetGameStart)."""
+    """Arranca la partida en red a partir del lobby (NetGameStart).
+
+    El host recibe un `ai_factory`: si un rival se cae, la IA lo controla hasta
+    que vuelva (la personalidad sale de la seed, como en un jugador)."""
+    is_host = net_start.role == "host"
+    ai_factory = None
+    if is_host:
+        personalities = list(load_ai_personalities())
+        seed = net_start.game.seed
+
+        def ai_factory(player_id, _seed=seed, _pers=personalities):
+            return AIPlayer(
+                player_id, "medio", personality=choose_personality(_seed, player_id, _pers)
+            )
+
     net = NetGame(
         net_start.session,
         net_start.game,
         net_start.human_id,
-        is_host=(net_start.role == "host"),
+        is_host=is_host,
         peer_name=net_start.peer_name,
+        ai_factory=ai_factory,
     )
     return GameScreen(
         net_start.game,

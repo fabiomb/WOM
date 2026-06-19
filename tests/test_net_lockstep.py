@@ -19,9 +19,9 @@ from wom.core.orders import (
     TransferTroopsOrder,
 )
 from wom.core.victory import VictoryMode, VictoryResult
-from wom.net.lockstep import NetGame, canonical_order
+from wom.net.lockstep import NetGame, Phase, canonical_order
 from wom.net.protocol import GameSetup
-from wom.net.session import ClientSession, HostSession, SessionState
+from wom.net.session import ClientSession, GameReady, HostSession, SessionState
 from wom.net.transport import Server, connect
 
 CONFIG_HASH = "lockstep-test"
@@ -194,6 +194,107 @@ def test_resync_recovers_a_diverged_client():
         assert client_net.game.to_dict() == host_net.game.to_dict()
     finally:
         _close(server, host_s, clients_s)
+
+
+def _ai_factory(player_id):
+    return AIPlayer(player_id, level="facil")
+
+
+def _advance(net, ai, others=()):
+    """El host (net) y nodos activos `others` mandan órdenes y se resuelve un
+    turno; el host cubre con IA a los jugadores ausentes. Devuelve False si la
+    partida terminó."""
+    nodes = [net, *(onet for onet, _ in others)]
+    t0 = [n.game.turn for n in nodes]  # antes de enviar: sin clientes presentes,
+    net.submit_local_orders(ai.decide_orders(net.game))  # el host resuelve ya
+    for onet, oai in others:
+        onet.submit_local_orders(oai.decide_orders(onet.game))
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        for n in nodes:
+            n.update()
+        if all(n.game.turn > t for n, t in zip(nodes, t0)):
+            return net.phase is not Phase.ENDED
+        time.sleep(0.005)
+    raise AssertionError("el turno no se resolvió")
+
+
+def test_ai_takes_over_dropped_player():
+    """Si un cliente se cae, el host lo cubre con IA y la partida sigue: el host
+    y el cliente que queda permanecen sincronizados."""
+    games = [_new_game(5, n_players=3) for _ in range(3)]
+    server, host_s, clients_s = _playing_group(3)
+    host_net = NetGame(host_s, games[0], 0, is_host=True, ai_factory=_ai_factory)
+    c1 = NetGame(clients_s[0], games[1], 1, is_host=False)
+    c2 = NetGame(clients_s[1], games[2], 2, is_host=False)
+    ai0, ai1, ai2 = AIPlayer(0, "facil"), AIPlayer(1, "facil"), AIPlayer(2, "facil")
+    try:
+        _drive_turn([host_net, c1, c2], [ai0, ai1, ai2])  # un turno con los 3
+        clients_s[1].connection.close()  # se cae el jugador 2
+
+        took_over = False
+        for _ in range(6):
+            alive = _advance(host_net, ai0, others=[(c1, ai1)])
+            assert host_net.game.to_dict() == c1.game.to_dict()  # siguen en sync
+            if 2 in host_net._absent:
+                took_over = True
+            if not alive:
+                break
+        assert took_over  # el host marcó al jugador 2 como ausente y lo cubrió
+        assert any("IA" in text for _who, text in host_net.chat_log)
+    finally:
+        _close(server, host_s, clients_s)
+
+
+def test_dropped_player_rejoins_with_live_state():
+    """El jugador caído reconecta, recibe el estado vivo y retoma su lugar; el
+    host deja de cubrirlo con IA y la partida sigue en sync."""
+    games = [_new_game(7, n_players=2) for _ in range(2)]
+    server, host_s, clients_s = _playing_group(2)
+    host_net = NetGame(host_s, games[0], 0, is_host=True, ai_factory=_ai_factory)
+    c1 = NetGame(clients_s[0], games[1], 1, is_host=False)
+    ai0, ai1 = AIPlayer(0, "facil"), AIPlayer(1, "facil")
+    rconn = None
+    try:
+        _drive_turn([host_net, c1], [ai0, ai1])
+        clients_s[0].connection.close()  # se cae el jugador 1
+        for _ in range(3):
+            if not _advance(host_net, ai0):  # la IA cubre al 1
+                break
+        assert 1 in host_net._absent
+        live_turn = host_net.game.turn
+
+        # Reconecta: nueva conexión al mismo host.
+        rconn = connect("127.0.0.1", server.port, timeout=3.0)
+        rsession = ClientSession(rconn, "C1-vuelve", config_hash=CONFIG_HASH)
+        setup = None
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            for sc in server.poll_connections():
+                host_s.add_connection(sc)  # idempotente
+            host_net.update()
+            for ev in rsession.update():
+                if isinstance(ev, GameReady):
+                    setup = ev.setup
+            if setup is not None and rsession.state is SessionState.PLAYING:
+                break
+            time.sleep(0.005)
+
+        assert setup is not None and setup.human_id == 1
+        assert 1 not in host_net._absent  # el host dejó de cubrirlo
+        rejoined_game = Game.from_dict(setup.state)
+        assert rejoined_game.turn == live_turn
+        assert rejoined_game.to_dict() == host_net.game.to_dict()
+
+        # Sigue jugando con el humano de vuelta, en sync.
+        rnet = NetGame(rsession, rejoined_game, 1, is_host=False)
+        if host_net.phase is not Phase.ENDED:
+            _drive_turn([host_net, rnet], [ai0, AIPlayer(1, "facil")])
+            assert host_net.game.to_dict() == rnet.game.to_dict()
+    finally:
+        _close(server, host_s, clients_s)
+        if rconn is not None:
+            rconn.close()
 
 
 def test_peer_orders_referencing_others_armies_are_dropped():

@@ -140,13 +140,15 @@ def test_dos_gamescreens_humano_vs_humano(screen):
         server.close()
 
 
-def test_desconexion_bloquea_y_sale_directo_al_menu(screen):
+def test_cliente_pierde_al_host_sale_al_menu(screen):
+    """Si cae el host (la autoridad), el cliente sí termina: muestra el corte y
+    ESC vuelve directo al menú sin confirmación."""
     server, host_s, client_s = _playing_sessions()
     game = _new_game(1)
-    net = NetGame(host_s, game, human_id=0, is_host=True)
-    gs = GameScreen(game, human_id=0, net=net)
+    net = NetGame(game=game, session=client_s, human_id=1, is_host=False)
+    gs = GameScreen(game, human_id=1, net=net)
     try:
-        client_s.connection.close()  # el rival se cae
+        host_s.cancel()  # cae el host
         deadline = time.time() + 3.0
         while not gs.net_disconnected and time.time() < deadline:
             gs.update()
@@ -158,7 +160,7 @@ def test_desconexion_bloquea_y_sale_directo_al_menu(screen):
         gs.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_ESCAPE}))
         assert gs.wants_menu and not gs.pending_quit
     finally:
-        host_s.cancel()
+        client_s.connection.close()
         server.close()
 
 

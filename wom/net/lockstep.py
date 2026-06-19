@@ -40,6 +40,8 @@ from wom.net.session import (
     Disconnected,
     HashReceived,
     OrdersReceived,
+    PlayerLeft,
+    PlayerRejoined,
     StateSyncReceived,
     TurnReady,
 )
@@ -94,6 +96,7 @@ class NetGame:
         human_id: int,
         is_host: bool,
         peer_name: str = "",
+        ai_factory=None,
     ) -> None:
         self.session = session
         self.game = game
@@ -104,6 +107,18 @@ class NetGame:
             p.name for p in game.players if p.id != human_id
         )
         self.n_players = len(game.players)
+
+        # Toma por IA de jugadores caídos (solo el host): `ai_factory(pid)`
+        # devuelve un controlador con `decide_orders(game)`. Mientras un jugador
+        # está ausente, el host genera sus órdenes con la IA y las mete en el
+        # bundle; los clientes las reciben ya hechas (no rompe el lockstep).
+        self.ai_factory = ai_factory
+        self._absent: set[int] = set()
+        self._ai: dict[int, object] = {}
+        if is_host and hasattr(session, "live_state_provider"):
+            session.live_state_provider = lambda: (
+                self.game.to_dict(), [p.name for p in self.game.players]
+            )
 
         self.phase = Phase.COLLECTING
         self._turn = game.turn  # turno que se está jugando ahora
@@ -175,10 +190,39 @@ class NetGame:
             self.chat_log.append((event.name, event.text))
         elif isinstance(event, StateSyncReceived):  # solo cliente
             self._apply_state_sync(event.state)
+        elif isinstance(event, PlayerLeft):  # solo host
+            self._on_player_left(event.player_id, event.reason)
+        elif isinstance(event, PlayerRejoined):  # solo host
+            self._on_player_rejoined(event.player_id, event.name)
         elif isinstance(event, Disconnected):
             self.disconnected = True
             self.disconnect_reason = event.reason
             self.phase = Phase.ENDED
+
+    def _on_player_left(self, player_id: int, reason: str) -> None:
+        """Host: un rival se cayó. La IA lo toma; se descartan sus órdenes
+        pendientes para que no se dupliquen con las de la IA."""
+        self._absent.add(player_id)
+        for orders in self._client_orders.values():
+            orders.pop(player_id, None)
+        if self.ai_factory is not None and player_id not in self._ai:
+            self._ai[player_id] = self.ai_factory(player_id)
+        name = self._player_name(player_id)
+        self._system_chat(f"{name} se desconectó; lo controla la IA")
+
+    def _on_player_rejoined(self, player_id: int, name: str) -> None:
+        """Host: el rival volvió y retoma el control de su jugador."""
+        self._absent.discard(player_id)
+        self._system_chat(f"{name} volvió a la partida")
+
+    def _player_name(self, player_id: int) -> str:
+        player = next((p for p in self.game.players if p.id == player_id), None)
+        return player.name if player is not None else f"Jugador {player_id}"
+
+    def _system_chat(self, text: str) -> None:
+        self.chat_log.append(("Sistema", text))
+        if self.is_host and hasattr(self.session, "send_system_chat"):
+            self.session.send_system_chat(text)
 
     def _try_resolve_host(self) -> None:
         """Host: si ya tiene las órdenes propias y las de todos los rivales para
@@ -186,9 +230,12 @@ class NetGame:
         if self.phase is not Phase.WAITING or self._local_orders is None:
             return
         client_orders = self._client_orders.get(self._turn, {})
-        if len(client_orders) < self.n_players - 1:
+        present_clients = (self.n_players - 1) - len(self._absent)
+        if len(client_orders) < present_clients:
             return
         bundle = {self.human_id: self._local_orders, **client_orders}
+        for player_id in self._absent:  # la IA cubre a los jugadores caídos
+            bundle[player_id] = self._ai_orders(player_id)
         self.session.broadcast_turn_orders(
             self._turn, {pid: encode_orders(od) for pid, od in bundle.items()}
         )
@@ -197,6 +244,11 @@ class NetGame:
         resolved_turn = self._turn  # _apply_turn ya avanzó self._turn
         for player_id in list(self._peer_hashes.get(resolved_turn, {})):
             self._check_hash(resolved_turn, player_id)
+
+    def _ai_orders(self, player_id: int) -> list[Order]:
+        """Órdenes de la IA para un jugador ausente (solo en el host)."""
+        controller = self._ai.get(player_id)
+        return controller.decide_orders(self.game) if controller is not None else []
 
     def _run_bundle(self, turn: int, bundle: dict) -> None:
         """Cliente: corre el conjunto completo de órdenes que repartió el host."""

@@ -220,16 +220,53 @@ def test_cancel_notifies_clients():
         _close_all(server, host, clients)
 
 
-def test_abrupt_disconnect_reported():
+def test_caida_de_cliente_deja_el_slot_libre():
+    """Una caída en plena partida NO termina la sesión: emite PlayerLeft y el
+    host sigue jugando (la IA cubrirá ese jugador)."""
+    from wom.net.session import PlayerLeft
+
     server, host, clients = _make_group(2)
     client = clients[0]
     try:
         _reach_lobby(server, host, clients)
         _reach_playing(server, host, clients)
         client.connection.close()  # caída abrupta, sin Bye
-        ev = _pump(server, host, clients, lambda c: _has(c[host], Disconnected))
-        disc = next(e for e in ev[host] if isinstance(e, Disconnected))
-        assert disc.player_id == 1  # el host sabe quién se cayó
-        assert host.state is SessionState.CLOSED
+        ev = _pump(server, host, clients, lambda c: _has(c[host], PlayerLeft))
+        left = next(e for e in ev[host] if isinstance(e, PlayerLeft))
+        assert left.player_id == 1  # el host sabe quién se cayó
+        assert host.state is SessionState.PLAYING  # la sesión sigue viva
+    finally:
+        _close_all(server, host, clients)
+
+
+def test_jugador_caido_puede_reconectar():
+    """El slot queda reservado: una nueva conexión retoma el id del ausente y
+    recibe el estado vivo (GameSetup) para retomar la partida."""
+    from wom.net.session import PlayerLeft, PlayerRejoined
+
+    server, host, clients = _make_group(2)
+    client = clients[0]
+    # El host simula tener estado vivo para los rejoins en partida.
+    host.live_state_provider = lambda: ({"turn": 5}, ["Host", "C1"])
+    try:
+        _reach_lobby(server, host, clients)
+        _reach_playing(server, host, clients)
+        client.connection.close()
+        _pump(server, host, clients, lambda c: _has(c[host], PlayerLeft))
+        assert 1 in host._absent
+
+        # El jugador vuelve: nueva conexión al mismo host.
+        rejoin_conn = connect("127.0.0.1", server.port, timeout=3.0)
+        rejoined = ClientSession(rejoin_conn, "C1-vuelve", config_hash=CONFIG_HASH)
+        ev = _pump(
+            server, host, [rejoined],
+            lambda c: _has(c[host], PlayerRejoined) and _has(c[rejoined], GameReady),
+        )
+        rj = next(e for e in ev[host] if isinstance(e, PlayerRejoined))
+        assert rj.player_id == 1  # retoma el mismo id
+        setup = next(e.setup for e in ev[rejoined] if isinstance(e, GameReady))
+        assert setup.human_id == 1 and setup.state == {"turn": 5}  # estado vivo
+        assert 1 not in host._absent
+        rejoin_conn.close()
     finally:
         _close_all(server, host, clients)

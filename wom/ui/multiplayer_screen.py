@@ -111,7 +111,6 @@ class MultiplayerScreen:
         self.server: Server | None = None
         self.session: HostSession | ClientSession | None = None
         self.status = ""
-        self._fed: set = set()  # conexiones ya entregadas a la HostSession
         self._client_setup: GameSetup | None = None
         self._host_game: Game | None = None
         self._host_rules: MatchRules | None = None
@@ -137,11 +136,8 @@ class MultiplayerScreen:
     def update(self) -> None:
         if self.mode != "waiting" or self.session is None:
             return
-        if self.role == "host" and self.server is not None:
-            for conn in self.server.poll_connections():
-                if conn not in self._fed:
-                    self._fed.add(conn)
-                    self.session.add_connection(conn)
+        # La HostSession saca las conexiones del propio Server (también durante
+        # la partida, para las reconexiones); acá solo se la bombea.
         for event in self.session.update():
             self._on_net_event(event)
         if self.role == "host" and self.session.state is SessionState.CONNECTING:
@@ -227,7 +223,6 @@ class MultiplayerScreen:
             self.server.close()
             self.server = None
         self.role = None
-        self._fed = set()
 
     # --- input -------------------------------------------------------------
 
@@ -305,11 +300,11 @@ class MultiplayerScreen:
             self.status = f"No se pudo abrir el puerto: {exc}"
             return
         self.session = HostSession(
-            self.n_players, self.f_name.value or "Host", self._setup_provider
+            self.n_players, self.f_name.value or "Host", self._setup_provider,
+            server=self.server,
         )
         self.role = "host"
         self.mode = "waiting"
-        self._fed = set()
         self.status = f"Esperando jugadores en el puerto {self.server.port}…"
 
     def _start_connecting(self) -> None:

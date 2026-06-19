@@ -8,7 +8,9 @@
 > idéntico (lockstep determinista, el host valida y resincroniza). Lo de abajo
 > describe el diseño original de 2 jugadores; la metodología (lockstep + host
 > autoritativo) y el protocolo se generalizaron, no se reemplazaron.
-> Limitación v1: si alguien se desconecta, la partida termina para todos.
+> **Caída/reconexión:** si un cliente se cae, el host lo cubre con IA y deja el
+> slot reservado; el jugador puede reconectarse en cualquier momento y retoma su
+> lugar con el estado vivo. Solo la caída del host termina la partida.
 
 Documento de diseño del modo multijugador, derivado del punto 11 de
 `especificaciones.md`. Define la metodología, la arquitectura, el protocolo de

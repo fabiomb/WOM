@@ -120,16 +120,16 @@ class Server:
         return self._sock.getsockname()[1]
 
     def _accept_loop(self) -> None:
+        # Acepta mientras el server esté abierto (no se corta al llenarse): así
+        # un jugador que se cayó puede reconectarse durante la partida. Quién
+        # entra y quién se rechaza lo decide la sesión (slots libres/ausentes).
         while True:
-            with self._lock:
-                if not self._open or len(self._connections) >= self._max_clients:
-                    return
             try:
                 client, _addr = self._sock.accept()
             except OSError:
                 return  # se cerró el server mientras esperaba
             with self._lock:
-                if self._open and len(self._connections) < self._max_clients:
+                if self._open:
                     self._connections.append(Connection(client))
                 else:
                     client.close()
