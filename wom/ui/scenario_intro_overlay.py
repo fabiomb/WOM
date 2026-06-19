@@ -93,7 +93,7 @@ class ScenarioIntroOverlay:
         self._wrap_text(surface, self.description, panel.centerx, y, inner)
 
         btn = pygame.Rect(0, 0, 300, 56)
-        btn.center = (panel.centerx, panel.bottom - 56)
+        btn.center = (panel.centerx, panel.bottom - 66)
         over = btn.collidepoint(scale.mouse_pos())
         pygame.draw.rect(
             surface, theme.BUTTON_BG_OVER if over else theme.BUTTON_BG, btn,
@@ -105,7 +105,7 @@ class ScenarioIntroOverlay:
         hint = self.small_font.render(
             "(clic, Enter o ESC para empezar)", True, theme.TEXT_DIM
         )
-        surface.blit(hint, hint.get_rect(midbottom=(panel.centerx, panel.bottom - 16)))
+        surface.blit(hint, hint.get_rect(midbottom=(panel.centerx, panel.bottom - 10)))
 
     def _wrap_text(self, surface, text, cx, y, max_w) -> int:
         """Dibuja `text` centrado y ajustado a `max_w`; respeta saltos de línea."""
