@@ -44,6 +44,28 @@ _BY_COAST = {sides: name for name, sides in _VARIANT_SIDES.items()}
 
 _DIRECTIONS = {"n": (0, -1), "s": (0, 1), "e": (1, 0), "w": (-1, 0)}
 _WATERLIKE = {Terrain.WATER, Terrain.BRIDGE_H, Terrain.BRIDGE_V}
+WATERLIKE = frozenset(_WATERLIKE)  # público: los tiles que se dibujan como agua
+
+# Esquinas de costa (overlay). Para cada esquina, las dos direcciones
+# ortogonales que la forman y su diagonal (Δx, Δy). Se superpone el overlay
+# cuando ambos vecinos ortogonales son agua pero la diagonal es tierra: una
+# punta de tierra que asoma en diagonal. El autotiling ortogonal de 16
+# variantes no cubre ese caso y sin el parche el corte entre tiles queda
+# abrupto. El overlay es un PNG con transparencia que se pinta sobre el tile
+# de agua, así no hace falta ningún tile nuevo en el modelo/editor/generador.
+_CORNERS: dict[str, tuple[Coord, Coord, Coord]] = {
+    "water_corner_ne": ((0, -1), (1, 0), (1, -1)),
+    "water_corner_nw": ((0, -1), (-1, 0), (-1, -1)),
+    "water_corner_se": ((0, 1), (1, 0), (1, 1)),
+    "water_corner_sw": ((0, 1), (-1, 0), (-1, 1)),
+}
+WATER_CORNER_VARIANTS = tuple(_CORNERS)
+
+
+def _is_land(world: WorldMap, pos: Coord) -> bool:
+    """Tierra = dentro del mapa y no es agua/puente. El borde del mapa cuenta
+    como agua (el río continúa fuera), igual que en `water_tile`."""
+    return world.in_bounds(pos) and world.terrain_at(pos) not in _WATERLIKE
 
 
 def water_tile(world: WorldMap, pos: Coord) -> str:
@@ -52,7 +74,23 @@ def water_tile(world: WorldMap, pos: Coord) -> str:
     land = frozenset(
         side
         for side, (dx, dy) in _DIRECTIONS.items()
-        if world.in_bounds((x + dx, y + dy))
-        and world.terrain_at((x + dx, y + dy)) not in _WATERLIKE
+        if _is_land(world, (x + dx, y + dy))
     )
     return _BY_COAST[land]
+
+
+def water_corners(world: WorldMap, pos: Coord) -> frozenset[str]:
+    """Overlays de esquina (water_corner_*) a superponer sobre el tile `pos`.
+
+    Una esquina se dibuja cuando los dos vecinos ortogonales que la forman son
+    agua y la diagonal es tierra (una punta de tierra asomando en diagonal).
+    Puede combinarse con cualquier variante de `water_tile` (p. ej. una orilla
+    recta al norte más una punta de tierra en el sudeste)."""
+    x, y = pos
+    return frozenset(
+        name
+        for name, (o1, o2, d) in _CORNERS.items()
+        if not _is_land(world, (x + o1[0], y + o1[1]))
+        and not _is_land(world, (x + o2[0], y + o2[1]))
+        and _is_land(world, (x + d[0], y + d[1]))
+    )

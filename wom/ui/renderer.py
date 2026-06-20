@@ -11,7 +11,7 @@ from wom.ui import theme
 from wom.ui.assets import Assets
 from wom.ui.camera import Camera
 from wom.ui.pathline import arrow_head, smooth_path, trim_tail
-from wom.ui.tiling import water_tile
+from wom.ui.tiling import WATERLIKE, water_corners, water_tile
 
 
 class MapRenderer:
@@ -39,18 +39,25 @@ class MapRenderer:
         self.refresh_terrain()
 
     def refresh_terrain(self) -> None:
-        """Recalcula la variante de costa de cada tile de agua (autotiling).
+        """Recalcula la variante de costa de cada tile de agua (autotiling) y
+        los overlays de esquina. Cubre agua y puentes por igual: el puente se
+        dibuja como agua autotileada con el tablón (transparente) encima, así
+        la orilla sigue por debajo sin cortes.
 
         En la partida el terreno es fijo y esto corre una vez; el editor lo
         invoca tras cada pincelada para que la costa se re-autotile en vivo.
         """
         world = self._world
-        self._water_tiles = {
-            (x, y): water_tile(world, (x, y))
-            for y in range(world.height)
-            for x in range(world.width)
-            if world.tiles[y][x] is Terrain.WATER
-        }
+        self._water_tiles = {}
+        self._water_corners = {}
+        for y in range(world.height):
+            for x in range(world.width):
+                if world.tiles[y][x] not in WATERLIKE:
+                    continue
+                self._water_tiles[(x, y)] = water_tile(world, (x, y))
+                corners = water_corners(world, (x, y))
+                if corners:
+                    self._water_corners[(x, y)] = corners
 
     @property
     def tile_size(self) -> int:
@@ -148,12 +155,17 @@ class MapRenderer:
         xs, ys = self.visible_tiles(game)
         for y in ys:
             for x in xs:
+                rect = self.tile_rect((x, y))
+                terrain = game.world.tiles[y][x]
                 variant = self._water_tiles.get((x, y))
-                if variant is not None:
-                    tile = assets.water[variant]
-                else:
-                    tile = assets.terrain[game.world.tiles[y][x]]
-                surface.blit(tile, self.tile_rect((x, y)))
+                if variant is None:  # terreno seco (pradera/bosque/montaña)
+                    surface.blit(assets.terrain[terrain], rect)
+                    continue
+                surface.blit(assets.water[variant], rect)  # agua autotileada
+                for corner in self._water_corners.get((x, y), ()):
+                    surface.blit(assets.water_corners[corner], rect)
+                if terrain is Terrain.BRIDGE_H or terrain is Terrain.BRIDGE_V:
+                    surface.blit(assets.terrain[terrain], rect)  # tablón encima
 
     def _draw_sites(self, surface: pygame.Surface, game: Game) -> None:
         for kind, sites in (("fort", game.world.forts), ("town", game.world.towns)):

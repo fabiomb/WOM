@@ -1,7 +1,7 @@
 """Tests del autotiling del agua (wom/ui/tiling.py, puro sin pygame)."""
 
 from wom.core.worldmap import CHAR_TO_TERRAIN, WorldMap
-from wom.ui.tiling import water_tile
+from wom.ui.tiling import water_corners, water_tile
 
 
 def _world(rows: list[str]) -> WorldMap:
@@ -88,3 +88,38 @@ def test_agua_en_u_con_salida_a_cada_punto_cardinal():
     assert water_tile(world, (2, 3)) == "water_u_n"
     assert water_tile(world, (1, 2)) == "water_u_e"
     assert water_tile(world, (3, 2)) == "water_u_w"
+
+
+def test_esquina_punta_de_tierra_en_diagonal():
+    # tierra que asoma por la diagonal NW: los dos ortogonales son agua
+    world = _world([
+        "ppwww",
+        "ppwww",
+        "wwwww",
+        "wwwww",
+    ])
+    assert water_corners(world, (2, 2)) == {"water_corner_nw"}
+    # agua interior pura (borde del mapa = agua): sin esquinas
+    assert water_corners(world, (3, 3)) == frozenset()
+
+
+def test_no_hay_esquina_si_el_ortogonal_ya_es_costa():
+    # (2,1) tiene costa recta al norte y al este: nada que suavizar en diagonal
+    world = _world([
+        "ppwww",
+        "ppwww",
+        "wwwww",
+        "wwwww",
+    ])
+    assert water_corners(world, (2, 1)) == frozenset()
+
+
+def test_esquina_convive_con_orilla_recta():
+    # costa recta al N y al E (water_ne) + una punta de tierra en el SO
+    world = _world([
+        "ppp",
+        "wwp",
+        "pwp",
+    ])
+    assert water_tile(world, (1, 1)) == "water_ne"
+    assert water_corners(world, (1, 1)) == {"water_corner_sw"}

@@ -12,7 +12,7 @@ import pygame
 
 from wom.core.worldmap import Terrain
 from wom.paths import resource_root
-from wom.ui.tiling import WATER_VARIANTS
+from wom.ui.tiling import WATER_CORNER_VARIANTS, WATER_VARIANTS
 
 ASSETS_DIR = resource_root() / "data" / "assets"
 
@@ -35,6 +35,11 @@ class Assets:
         }
         # Variantes de costa del agua (autotiling, ver wom/ui/tiling.py).
         self.water = {name: _load(name, tile_size) for name in WATER_VARIANTS}
+        # Overlays de esquina (transparentes): suavizan las puntas de tierra
+        # en diagonal que el autotiling ortogonal no cubre.
+        self.water_corners = {
+            name: _load(name, tile_size) for name in WATER_CORNER_VARIANTS
+        }
         self.units = {u: _load(u, unit_size) for u in UNIT_IDS}
         self.icons = {i: _load(i, icon_size) for i in ICON_IDS}
 

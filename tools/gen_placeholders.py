@@ -6,10 +6,13 @@ arte final ya instalado.
 
 Convención de tamaños (el arte final reemplaza archivos con el mismo
 nombre y dimensiones):
-- Tiles de terreno: 64x64 px (plains, forest, mountain, water, bridge_h,
-  bridge_v, y las 15 variantes de costa del agua: water_n/s/e/w,
-  water_ne/nw/se/sw, los canales water_ns/water_ew, las U water_u_n/s/e/w
-  y water_single — ver wom/ui/tiling.py)
+- Tiles de terreno: 64x64 px (plains, forest, mountain, water, y las 15
+  variantes de costa del agua: water_n/s/e/w, water_ne/nw/se/sw, los canales
+  water_ns/water_ew, las U water_u_n/s/e/w y water_single — ver
+  wom/ui/tiling.py). Los 4 overlays de esquina (water_corner_ne/nw/se/sw) y
+  los 2 puentes (bridge_h/bridge_v) son 64x64 CON transparencia: se dibujan
+  sobre el tile de agua (la esquina suaviza una punta de tierra en diagonal;
+  el puente deja ver la orilla por debajo).
 - Unidades/ejércitos: 48x48 px (una por clase: partisano, soldado,
   caballero, arquero) — color de fondo según jugador se aplica en runtime.
 - Íconos: 32x32 px (fort, town, cruz de ejército muerto, y las banderas:
@@ -137,9 +140,31 @@ def _make_water_edge(name: str, sides: tuple[str, ...], size: int, out_dir: Path
     _save(surface, name, out_dir)
 
 
+# Esquina → diagonal (Δx, Δy) donde asoma la tierra (1 = lado max del eje).
+_CORNER_DIAG = {
+    "water_corner_ne": (1, -1),
+    "water_corner_nw": (-1, -1),
+    "water_corner_se": (1, 1),
+    "water_corner_sw": (-1, 1),
+}
+
+
+def _make_water_corner(name: str, size: int, out_dir: Path) -> None:
+    """Overlay de esquina transparente: una mancha de orilla en el vértice por
+    donde asoma la tierra en diagonal. Se pinta sobre el tile de agua."""
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    band = max(4, size // 7)
+    dx, dy = _CORNER_DIAG[name]
+    x = size - band if dx > 0 else 0
+    y = size - band if dy > 0 else 0
+    pygame.draw.rect(surface, SHORE_COLOR, pygame.Rect(x, y, band, band))
+    _save(surface, name, out_dir)
+
+
 def _make_bridge(name: str, horizontal: bool, size: int, out_dir: Path) -> None:
-    """Puente de madera sobre agua: tablones perpendiculares al curso."""
-    surface = _water_base(size)
+    """Puente de madera transparente: solo los tablones, sin agua de fondo
+    (el render dibuja el agua autotileada por debajo)."""
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
     span = max(8, size // 2)  # ancho de la pasarela
     if horizontal:
         deck = pygame.Rect(0, (size - span) // 2, size, span)
@@ -168,6 +193,8 @@ def main() -> None:
             _make(name, size, color, ASSETS_DIR)
     for name, sides in WATER_EDGES.items():
         _make_water_edge(name, sides, 64, ASSETS_DIR)
+    for name in _CORNER_DIAG:
+        _make_water_corner(name, 64, ASSETS_DIR)
     _make_bridge("bridge_h", True, 64, ASSETS_DIR)
     _make_bridge("bridge_v", False, 64, ASSETS_DIR)
     for name, color in FLAGS.items():
