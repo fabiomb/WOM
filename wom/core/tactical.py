@@ -38,6 +38,7 @@ from wom.core.battle import (
     _classify,
     _xp_deltas,
 )
+from wom.core import formations
 from wom.core.config import UnitClass
 from wom.core.worldmap import WorldMap
 
@@ -98,6 +99,8 @@ class TacticalBattle:
         field_h: int,
         walls: frozenset[tuple[int, int]] = frozenset(),
         gate_cells: tuple[tuple[int, int], ...] = (),
+        attacker_zone: tuple[float, float, float, float] | None = None,
+        defender_zone: tuple[float, float, float, float] | None = None,
         rng: random.Random | None = None,
     ):
         self.attacker_owner = attacker_owner
@@ -115,6 +118,13 @@ class TacticalBattle:
         self.walls = walls
         self.gate_cells = gate_cells
         self.rng = rng or random.Random()
+        # Zonas de despliegue de cada bando (para reordenar por formación) y la
+        # formación activa de cada uno. Por defecto, mitades opuestas del campo.
+        self.attacker_zone = attacker_zone or (1.0, field_w * 0.4, 1.0, field_h - 1.0)
+        self.defender_zone = defender_zone or (
+            field_w * 0.6, field_w - 1.0, 1.0, field_h - 1.0
+        )
+        self.formation = {attacker_owner: formations.LINE, defender_owner: formations.LINE}
 
         self.elapsed = 0.0
         self.over = False
@@ -151,6 +161,23 @@ class TacticalBattle:
             if u.id == uid:
                 return u
         return None
+
+    # --- formaciones (fase de preparación) -------------------------------
+    def set_formation(self, owner: int, formation: str) -> None:
+        """Reordena las fichas de `owner` en su zona según `formation`.
+
+        Pensado para la fase de preparación (antes de que arranque el combate):
+        reubica las fichas, no mueve nada en pleno combate."""
+        zone = self.attacker_zone if owner == self.attacker_owner else self.defender_zone
+        facing = 1 if owner == self.attacker_owner else -1
+        mine = [u for u in self.units if u.owner == owner]
+        formations.arrange(
+            mine, zone, facing=facing, formation=formation, classes=self.classes
+        )
+        self.formation[owner] = formation
+
+    def formation_of(self, owner: int) -> str:
+        return self.formation.get(owner, formations.LINE)
 
     # --- órdenes del jugador / IA ----------------------------------------
     def command(self, unit_ids, kind: OrderKind, target=None) -> None:
@@ -493,8 +520,8 @@ def build_tactical_battle(
     else:
         attacker_zone = (2.0, w * 0.28, 1.5, h - 1.5)
         defender_zone = (w * 0.72, w - 2.0, 1.5, h - 1.5)
-    next_id = _deploy(attacker, classes, tcfg, rng, units, next_id, zone=attacker_zone)
-    _deploy(defender, classes, tcfg, rng, units, next_id, zone=defender_zone)
+    next_id = _deploy(attacker, classes, tcfg, units, next_id, zone=attacker_zone)
+    _deploy(defender, classes, tcfg, units, next_id, zone=defender_zone)
 
     battle = TacticalBattle(
         attacker_owner=attacker.owner,
@@ -510,6 +537,8 @@ def build_tactical_battle(
         field_h=h,
         walls=frozenset(walls),
         gate_cells=tuple(gate),
+        attacker_zone=attacker_zone,
+        defender_zone=defender_zone,
         rng=rng,
     )
     # Factores de daño comida/XP reales de cada Army (igual que _army_power).
@@ -517,6 +546,10 @@ def build_tactical_battle(
         attacker.owner: _supply(attacker, battle_config),
         defender.owner: _supply(defender, battle_config),
     }
+    # Formación inicial: línea para ambos bandos (la IA del rival puede cambiar
+    # la suya en la preparación; el humano elige con 1/2/3/4).
+    battle.set_formation(attacker.owner, formations.LINE)
+    battle.set_formation(defender.owner, formations.LINE)
     return battle
 
 
@@ -528,9 +561,13 @@ def _supply(army: Army, cfg: dict) -> float:
     return f * x
 
 
-def _deploy(army, classes, tcfg, rng, units, next_id, *, zone) -> int:
-    """Crea fichas de un ejército dentro de `zone` (x0,x1,y0,y1)."""
+def _deploy(army, classes, tcfg, units, next_id, *, zone) -> int:
+    """Crea las fichas de un ejército dentro de `zone` (x0,x1,y0,y1).
+
+    Las coloca en el centro de la zona; la formación (línea por defecto) las
+    reordena después, así el despliegue es determinista (sin RNG)."""
     x0, x1, y0, y1 = zone
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
     total = army.total_troops
     if total <= 0:
         return next_id
@@ -548,8 +585,7 @@ def _deploy(army, classes, tcfg, rng, units, next_id, *, zone) -> int:
             troops = base + (1 if i < extra else 0)
             if troops <= 0:
                 continue
-            x = rng.uniform(x0, x1)
-            y = rng.uniform(y0, y1)
+            x, y = cx, cy
             units.append(
                 Unit(
                     id=next_id,

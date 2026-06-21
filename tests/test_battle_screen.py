@@ -118,6 +118,39 @@ def test_clic_simple_selecciona_una_unidad(screen):
     assert bs.selected == {unit.id}
 
 
+def test_teclas_1_4_cambian_la_formacion_en_preparacion(screen):
+    bs = BattleScreen(_battle(), human_owner=0)
+    assert bs.phase == "planning"
+    assert bs.formation == "linea"  # arranca en línea por defecto
+    antes = {u.id: (u.x, u.y) for u in bs.battle.units if u.owner == 0}
+    bs.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_2}))
+    assert bs.formation == "clasica"
+    assert bs.battle.formation_of(0) == "clasica"
+    # reordenó al menos una ficha del humano
+    assert any(
+        antes[u.id] != (u.x, u.y) for u in bs.battle.units if u.owner == 0
+    )
+    bs.draw(screen)  # el panel de cuenta regresiva con el selector no lanza
+
+
+def test_clic_en_etiqueta_de_formacion_la_aplica(screen):
+    bs = BattleScreen(_battle(), human_owner=0)
+    rect, _text = bs._formation_rects["v"]
+    bs.handle_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": rect.center, "button": 1})
+    )
+    assert bs.formation == "v"
+    assert bs.battle.formation_of(0) == "v"
+    assert bs._drag_start is None  # tomó el clic, no inició caja de selección
+
+
+def test_no_se_cambia_formacion_una_vez_en_combate(screen):
+    bs = BattleScreen(_battle(), human_owner=0)
+    bs.phase = "fighting"
+    bs.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_3}))
+    assert bs.formation == "linea"  # ya no se reordena en pleno combate
+
+
 def test_boton_comenzar_arranca_el_combate(screen):
     bs = BattleScreen(_battle(), human_owner=0)
     bs.handle_event(

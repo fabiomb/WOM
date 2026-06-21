@@ -214,6 +214,18 @@ tropas se despliegan como unidades, **cada una con el color de su jugador**
   **aguantan** la posición —no atacan solas— para que vos decidas la táctica. El
   combate empieza solo al llegar el contador a 0, o antes con **Espacio** (o el
   botón «Comenzar»).
+- En la preparación elegís una **formación de despliegue** con las teclas
+  **1/2/3/4**, que reordena tus tropas al instante:
+  - **1 · Línea**: todos en una línea ancha al frente. Es la de defecto y la que
+    conviene cuando tenés pocas tropas.
+  - **2 · Clásica**: arqueros detrás, infantería al frente, caballería en los
+    flancos.
+  - **3 · Compacta**: un bloque apretado.
+  - **4 · En V**: la infantería forma una V con la punta hacia el enemigo, con la
+    caballería y los arqueros en los flancos traseros.
+
+  El rival también despliega en formación según le conviene. El panel de la
+  cuenta regresiva muestra el selector con la formación activa resaltada.
 - **Clic** en una unidad para seleccionarla; **arrastrá** un recuadro para
   seleccionar un grupo; **A** selecciona todas.
 - **Clic derecho** sobre el enemigo para atacarlo, o sobre el campo para mover.
@@ -284,6 +296,7 @@ En cualquier modo, si dejás al rival sin ejércitos ni fuertes, ganás al insta
 | Fin del turno                       | Botón "Fin del turno" o **Enter** |
 | Dirigir / auto-resolver una batalla | Tecla **Z** (zoom) / **A** (auto) en el aviso de batalla |
 | En el combate: comenzar             | **Espacio** (tras ordenar a tus tropas en la preparación) |
+| En el combate: formación            | **1** línea · **2** clásica · **3** compacta · **4** en V (durante la preparación) |
 | En el combate: seleccionar          | Arrastrar recuadro, clic en unidad, **A** todas |
 | En el combate: mover / atacar       | Clic derecho (campo / enemigo); **H** aguantar; **ESC** pausa |
 | Guardar partida                     | Botón "Guardar" o tecla **G** |

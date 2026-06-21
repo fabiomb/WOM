@@ -9,7 +9,10 @@ nivel de su ejército** (facil/medio/dificil, vía `enemy_level`).
 
 Arranca en una **fase de preparación** (pausada): las fichas del humano
 empiezan en "aguantar" (no atacan hasta que se les ordena) para que el general
-decida la táctica; con Espacio (o el botón "Comenzar") arranca el combate. Cada
+decida la táctica. Durante la cuenta regresiva el jugador puede elegir una
+**formación de despliegue** con 1/2/3/4 (línea/clásica/compacta/en V), que
+reordena sus tropas; la IA del rival elige la suya según su composición. Con
+Espacio (o el botón "Comenzar") arranca el combate. Cada
 ficha se enmarca con el **color de su jugador** (rojo J1, azul J2, verde J3,
 amarillo J4) y muestra sus tropas, igual que en el mapa. Los **arqueros**
 disparan a distancia con un efecto de flecha.
@@ -29,6 +32,7 @@ import math
 import pygame
 
 from wom.ai.tactical_ai import TacticalAI
+from wom.core import formations
 from wom.core.battle import BattleOutcome, BattleResult
 from wom.core.tactical import TacticalBattle, Unit
 from wom.ui import scale, theme
@@ -64,6 +68,14 @@ SELECT_COLOR = (250, 220, 60)
 ATTACK_LINE = (255, 120, 90)
 PREP_SECONDS = 10.0  # cuenta regresiva de preparación antes del combate
 
+# Teclas 1..4 (fila superior y teclado numérico) → formación de despliegue.
+_FORMATION_KEYS = {
+    pygame.K_1: formations.LINE, pygame.K_KP1: formations.LINE,
+    pygame.K_2: formations.CLASSIC, pygame.K_KP2: formations.CLASSIC,
+    pygame.K_3: formations.COMPACT, pygame.K_KP3: formations.COMPACT,
+    pygame.K_4: formations.VEE, pygame.K_KP4: formations.VEE,
+}
+
 def _lighten(color: tuple[int, int, int], factor: float = 0.45) -> tuple[int, int, int]:
     """Versión aclarada de un color (para el disco translúcido bajo el sprite)."""
     return tuple(int(c + (255 - c) * factor) for c in color)
@@ -94,6 +106,11 @@ class BattleScreen:
         # La IA del rival usa el nivel de su ejército (facil/medio/dificil),
         # igual que el resto del juego, no un manejo fijo de horda.
         self.ai = TacticalAI.for_level(self.enemy_owner, enemy_level)
+        # La IA elige su formación de despliegue para esta batalla.
+        self.ai.plan_formation(battle)
+        # Formación activa del humano (arranca en línea); el jugador la cambia
+        # con 1/2/3/4 durante la preparación.
+        self.formation = battle.formation_of(human_owner)
         self.selected: set[int] = set()
         self._drag_start: tuple[int, int] | None = None
         self._drag_now: tuple[int, int] | None = None
@@ -162,6 +179,28 @@ class BattleScreen:
         self._auto_btn = pygame.Rect(w - 230, 12, 210, HUD_H - 24)
         # Botón "Comenzar" (solo en preparación), a la izquierda del de auto.
         self._start_btn = pygame.Rect(w - 470, 12, 220, HUD_H - 24)
+        self._layout_formation_chooser(w)
+
+    def _layout_formation_chooser(self, w: int) -> None:
+        """Rects clickeables de cada opción de formación (panel de la cuenta).
+
+        Se calculan acá (no en el dibujo) para que el clic use la misma
+        geometría. El panel va centrado arriba; esta fila, cerca de su base."""
+        cx = w // 2
+        cy = HUD_H + 12 + 134 - 26  # base del panel de cuenta regresiva
+        texts = [
+            f"{i + 1} {formations.FORMATION_NAMES[key]}"
+            for i, key in enumerate(formations.FORMATIONS)
+        ]
+        widths = [self.small_font.size(t)[0] for t in texts]
+        gap = 18
+        x = cx - (sum(widths) + gap * (len(texts) - 1)) // 2
+        self._formation_rects: dict[str, tuple[pygame.Rect, str]] = {}
+        for key, text, width in zip(formations.FORMATIONS, texts, widths):
+            rect = pygame.Rect(0, 0, width, self.small_font.get_height())
+            rect.midleft = (x, cy)
+            self._formation_rects[key] = (rect, text)
+            x += width + gap
 
     def to_px(self, x: float, y: float) -> tuple[int, int]:
         # Shear por profundidad (fuerte): arriba/lejos corre a la derecha para
@@ -221,6 +260,10 @@ class BattleScreen:
             if self.phase == "planning":
                 self.phase = "fighting"  # arranca el combate
             return
+        if self.phase == "planning" and key in _FORMATION_KEYS:
+            self.battle.set_formation(self.human_owner, _FORMATION_KEYS[key])
+            self.formation = _FORMATION_KEYS[key]
+            return
         if key == pygame.K_ESCAPE:
             self.paused = not self.paused
         elif key in (pygame.K_h,):
@@ -237,10 +280,22 @@ class BattleScreen:
             if self.phase == "planning" and self._start_btn.collidepoint(event.pos):
                 self.phase = "fighting"
                 return
+            if self.phase == "planning" and self._click_formation(event.pos):
+                return
             self._drag_start = event.pos
             self._drag_now = event.pos
         elif event.button == 3 and self.selected:
             self._issue_order(event.pos)
+
+    def _click_formation(self, pos: tuple[int, int]) -> bool:
+        """Clic en una etiqueta de formación del panel: la aplica. Devuelve True
+        si tomó el clic (para no iniciar una caja de selección)."""
+        for key, (rect, _text) in self._formation_rects.items():
+            if rect.inflate(10, 6).collidepoint(pos):
+                self.battle.set_formation(self.human_owner, key)
+                self.formation = key
+                return True
+        return False
 
     def _on_mouse_up(self, event: pygame.event.Event) -> None:
         if self._drag_start is None:
@@ -473,11 +528,17 @@ class BattleScreen:
             True, theme.TEXT,
         )
         surface.blit(txt, (20, HUD_H // 2 - txt.get_height() // 2))
-        hint = self.small_font.render(
-            "Clic: una unidad · arrastrá: grupo · clic der.: mover/atacar"
-            " · H: aguantar · A: todas · ESC: pausa",
-            True, theme.TEXT_DIM,
-        )
+        if self.phase == "planning":
+            hint_text = (
+                "1-4: formación (línea/clásica/compacta/en V)"
+                " · clic: seleccionar · clic der.: mover · Espacio: comenzar"
+            )
+        else:
+            hint_text = (
+                "Clic: una unidad · arrastrá: grupo · clic der.: mover/atacar"
+                " · H: aguantar · A: todas · ESC: pausa"
+            )
+        hint = self.small_font.render(hint_text, True, theme.TEXT_DIM)
         surface.blit(hint, (20, HUD_H - hint.get_height() - 4))
         mouse = scale.mouse_pos()
         if self.phase == "planning":
@@ -511,22 +572,32 @@ class BattleScreen:
 
     def _draw_countdown(self, surface: pygame.Surface) -> None:
         """Cuenta regresiva de preparación: panel chico arriba al centro, sin
-        oscurecer el campo para que se vean bien las tropas."""
+        oscurecer el campo para que se vean bien las tropas. Incluye el selector
+        de formación (1-4), con la activa resaltada."""
         secs = max(0, int(math.ceil(self._countdown)))
-        panel = pygame.Rect(0, 0, 560, 96)
-        panel.midtop = (self.win_w // 2, HUD_H + 16)
+        panel = pygame.Rect(0, 0, 640, 134)
+        panel.midtop = (self.win_w // 2, HUD_H + 12)
         bg = pygame.Surface(panel.size, pygame.SRCALPHA)
-        bg.fill((0, 0, 0, 130))
+        bg.fill((0, 0, 0, 140))
         surface.blit(bg, panel.topleft)
         pygame.draw.rect(surface, SELECT_COLOR, panel, 2, border_radius=10)
-        head = self.font.render(
-            "Preparación — ordená a tus tropas", True, theme.TEXT
-        )
-        surface.blit(head, head.get_rect(midtop=(panel.centerx, panel.y + 10)))
-        big = self.title_font.render(
-            f"Comienza en {secs}…  (Espacio para ya)", True, SELECT_COLOR
-        )
-        surface.blit(big, big.get_rect(midbottom=(panel.centerx, panel.bottom - 8)))
+        head = self.font.render("Preparación — ordená a tus tropas", True, theme.TEXT)
+        surface.blit(head, head.get_rect(midtop=(panel.centerx, panel.y + 8)))
+        big = self.title_font.render(f"Comienza en {secs}…", True, SELECT_COLOR)
+        surface.blit(big, big.get_rect(midtop=(panel.centerx, panel.y + 36)))
+        self._draw_formation_chooser(surface)
+
+    def _draw_formation_chooser(self, surface) -> None:
+        """Fila de opciones de formación (1-4); la activa va resaltada. Cada
+        etiqueta es clickeable (rects calculados en `_layout_formation_chooser`)."""
+        for key, (rect, text) in self._formation_rects.items():
+            active = key == self.formation
+            if active:
+                pygame.draw.rect(surface, SELECT_COLOR, rect.inflate(10, 6), border_radius=5)
+            label = self.small_font.render(
+                text, True, (20, 20, 20) if active else theme.TEXT
+            )
+            surface.blit(label, rect)
 
     def _draw_center_banner(self, surface, text, subtitle=None, color=theme.TEXT) -> None:
         overlay = pygame.Surface((self.win_w, self.win_h), pygame.SRCALPHA)

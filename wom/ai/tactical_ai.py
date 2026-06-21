@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 
+from wom.core import formations
 from wom.core.config import load_ai_config
 from wom.core.tactical import TacticalBattle, Unit
 
@@ -31,10 +32,20 @@ _DEFAULT = {"prio_rango": 6.0, "intervalo": 0.5}
 class TacticalAI:
     """Da órdenes a las fichas de `owner` con la habilidad de su nivel."""
 
-    def __init__(self, owner: int, *, interval: float = 0.5, prio_range: float = 6.0):
+    def __init__(
+        self,
+        owner: int,
+        *,
+        interval: float = 0.5,
+        prio_range: float = 6.0,
+        smart_formation: bool = True,
+    ):
         self.owner = owner
         self.interval = interval
         self.prio_range = prio_range
+        # facil despliega siempre en línea; medio/dificil eligen formación
+        # según su composición (igual que un jugador que sabe lo que hace).
+        self.smart_formation = smart_formation
         self._timer = 0.0
 
     @classmethod
@@ -45,7 +56,24 @@ class TacticalAI:
             owner,
             interval=cfg.get("intervalo", _DEFAULT["intervalo"]),
             prio_range=cfg.get("prio_rango", _DEFAULT["prio_rango"]),
+            smart_formation=level != "facil",
         )
+
+    def plan_formation(self, battle: TacticalBattle) -> str:
+        """Elige y aplica la formación de despliegue (fase de preparación).
+
+        Devuelve la clave de formación usada. facil cae siempre en línea; los
+        demás eligen según su composición vía `formations.recommend`."""
+        mine = [u for u in battle.units if u.owner == self.owner]
+        if not mine:
+            return formations.LINE
+        formation = (
+            formations.recommend(mine, battle.classes)
+            if self.smart_formation
+            else formations.LINE
+        )
+        battle.set_formation(self.owner, formation)
+        return formation
 
     def update(self, battle: TacticalBattle, dt: float) -> None:
         self._timer -= dt

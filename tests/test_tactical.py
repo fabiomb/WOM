@@ -48,6 +48,28 @@ def test_atacante_superior_gana_en_campo_abierto():
     assert sum(result.defender_losses.values()) > sum(result.attacker_losses.values())
 
 
+def test_set_formation_reordena_dentro_de_la_zona():
+    world = _world()
+    attacker = Army(id=0, owner=0, position=(2, 2),
+                    composition={"soldado": 40, "arquero": 20, "caballero": 20})
+    defender = Army(id=1, owner=1, position=(7, 2), composition={"soldado": 30})
+    battle = build_tactical_battle(
+        attacker, defender, world, _classes(), _cfg(), random.Random(1)
+    )
+    antes = {u.id: (u.x, u.y) for u in battle.units if u.owner == 0}
+    battle.set_formation(0, "clasica")
+    assert battle.formation_of(0) == "clasica"
+    x0, x1, y0, y1 = battle.attacker_zone
+    movio = False
+    for u in battle.units:
+        if u.owner != 0:
+            continue
+        assert x0 - 1e-6 <= u.x <= x1 + 1e-6 and y0 - 1e-6 <= u.y <= y1 + 1e-6
+        if antes[u.id] != (u.x, u.y):
+            movio = True
+    assert movio  # cambiar de formación reubica las fichas
+
+
 def test_resultado_determinista_con_mismo_seed():
     world = _world()
 

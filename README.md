@@ -22,8 +22,9 @@ producen tropas, pueblos que dan comida y batallas autoresueltas. Hecho en
   por composición, terreno, comida y experiencia; el perdedor se retira.
 - **Zoom de batalla en tiempo real** (opcional, partida individual): al chocar,
   el juego pregunta si dirigís el combate o lo auto-resuelve. Si lo dirigís,
-  desplegás y das órdenes a tus tropas en vivo (mover, atacar, aguantar) en un
-  mini-RTS, en campo abierto o asaltando un fuerte con su muralla y puerta.
+  elegís una **formación de despliegue** (línea, clásica, compacta o en V) en la
+  cuenta regresiva y das órdenes a tus tropas en vivo (mover, atacar, aguantar)
+  en un mini-RTS, en campo abierto o asaltando un fuerte con su muralla y puerta.
 - **Tres niveles de IA** (fácil / medio / difícil) sobre un mismo motor de
   scoring de objetivos, balanceados por simulación masiva.
 - **Tres modos de victoria**: conquista total, captura de banderas o límite de

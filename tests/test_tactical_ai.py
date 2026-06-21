@@ -46,6 +46,28 @@ def test_dificil_le_gana_a_facil_con_fuerzas_iguales():
     assert dificil_total > facil_total
 
 
+def test_plan_formation_dificil_elige_segun_composicion():
+    world = _world()
+    a = Army(id=0, owner=0, position=(2, 2), composition={"soldado": 40, "arquero": 20})
+    d = Army(id=1, owner=1, position=(9, 2), composition={"soldado": 40, "arquero": 20})
+    battle = build_tactical_battle(
+        a, d, world, load_unit_classes(), load_game_config()["batalla"], random.Random(3)
+    )
+    # armas combinadas (infantería + arqueros) ⇒ formación clásica
+    assert TacticalAI.for_level(1, "dificil").plan_formation(battle) == "clasica"
+    assert battle.formation_of(1) == "clasica"
+
+
+def test_plan_formation_facil_siempre_linea():
+    world = _world()
+    a = Army(id=0, owner=0, position=(2, 2), composition={"soldado": 40, "arquero": 20})
+    d = Army(id=1, owner=1, position=(9, 2), composition={"soldado": 40, "arquero": 20})
+    battle = build_tactical_battle(
+        a, d, world, load_unit_classes(), load_game_config()["batalla"], random.Random(3)
+    )
+    assert TacticalAI.for_level(1, "facil").plan_formation(battle) == "linea"
+
+
 def test_ia_asigna_ordenes_de_ataque_validas():
     world = _world()
     a = Army(id=0, owner=0, position=(2, 2), composition={"soldado": 30})
