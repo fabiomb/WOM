@@ -4,7 +4,7 @@
     "velocidad": 4,
     "ataque": 4,
     "defensa": 3,
-    "bonus_terreno": { "forest": 1.5, "mountain": 1.3, "plains": 0.9 },
+    "bonus_terreno": { "forest": 1.5, "mountain": 1.3, "plains": 0.9, "forest-less": 1.3, "mountain-less": 1.2, "marshes": 1.4 },
     "bonus_vs": { "soldado": 1.2 }
   },
   "soldado": {
@@ -12,7 +12,7 @@
     "velocidad": 3,
     "ataque": 6,
     "defensa": 6,
-    "bonus_terreno": { "plains": 1.1 },
+    "bonus_terreno": { "plains": 1.1, "marshes": 0.9 },
     "bonus_vs": { "caballero": 1.2 }
   },
   "caballero": {
@@ -20,7 +20,7 @@
     "velocidad": 6,
     "ataque": 8,
     "defensa": 5,
-    "bonus_terreno": { "plains": 1.4, "forest": 0.6, "mountain": 0.5 },
+    "bonus_terreno": { "plains": 1.4, "forest": 0.6, "mountain": 0.5, "forest-less": 0.8, "mountain-less": 0.8, "marshes": 0.6 },
     "bonus_vs": { "arquero": 1.5 }
   },
   "arquero": {
@@ -28,7 +28,7 @@
     "velocidad": 3,
     "ataque": 7,
     "defensa": 3,
-    "bonus_terreno": { "mountain": 1.3, "forest": 1.1 },
+    "bonus_terreno": { "mountain": 1.3, "forest": 1.1, "forest-less": 0.85, "mountain-less": 1.2, "marshes": 0.9 },
     "bonus_vs": { "soldado": 1.3, "partisano": 1.2 },
     "ignora_bonus_fort": true
   }

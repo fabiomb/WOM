@@ -82,7 +82,7 @@ from wom.core.orders import (
     Order,
     SplitArmyOrder,
 )
-from wom.core.pathfind import dijkstra, reconstruct_path
+from wom.core.pathfind import army_terrain_costs, dijkstra, reconstruct_path
 from wom.core.worldmap import Coord
 
 # Valores base de cada tipo de objetivo. Los pesos del nivel los modulan;
@@ -248,8 +248,12 @@ class AIPlayer:
             if self.params.get("evita_peligro", False)
             else None
         )
+        terrain_costs = army_terrain_costs(
+            game.config["costo_terreno"], army.composition,
+            game.config.get("costo_terreno_clase"),
+        )
         dist, prev = dijkstra(
-            game.world, army.position, game.config["costo_terreno"], extra_cost=danger
+            game.world, army.position, terrain_costs, extra_cost=danger
         )
         candidates = (
             self._capture_candidates(game, dist)

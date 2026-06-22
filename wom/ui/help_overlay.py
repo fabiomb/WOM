@@ -27,8 +27,18 @@ TILE_SPRITE = 40
 TERRAIN_NAMES = {
     Terrain.PLAINS: "Llanura",
     Terrain.FOREST: "Bosque",
+    Terrain.FOREST_LIGHT: "Bosque ralo",
     Terrain.MOUNTAIN: "Montaña",
+    Terrain.MOUNTAIN_LIGHT: "Colina",
+    Terrain.MARSH: "Pantano",
     Terrain.WATER: "Agua",
+}
+# Detalle táctico extra que se muestra junto al costo de movimiento en la
+# leyenda del mapa (las variantes livianas y el pantano tienen su gracia).
+TERRAIN_DETAIL = {
+    Terrain.FOREST_LIGHT: "cubre al partisano; estorba a caballero y arquero",
+    Terrain.MOUNTAIN_LIGHT: "favorece a arquero y partisano",
+    Terrain.MARSH: "frena a todos salvo al partisano (que además pelea mejor)",
 }
 VICTORY_LABELS = {
     VictoryMode.TOTAL: ("Total", "Eliminá todos los ejércitos y fuertes del rival."),
@@ -63,7 +73,10 @@ class HelpOverlay:
             return
         self._terrain = {
             t: load_scaled(t.value, TILE_SPRITE)
-            for t in (Terrain.PLAINS, Terrain.FOREST, Terrain.MOUNTAIN, Terrain.WATER)
+            for t in (
+                Terrain.PLAINS, Terrain.FOREST, Terrain.FOREST_LIGHT,
+                Terrain.MOUNTAIN, Terrain.MOUNTAIN_LIGHT, Terrain.MARSH, Terrain.WATER,
+            )
         }
         self._units = {cid: load_scaled(cid, UNIT_SPRITE) for cid in game.classes}
         self._sites = {name: load_scaled(name, TILE_SPRITE) for name in ("fort", "town")}
@@ -199,7 +212,11 @@ class HelpOverlay:
     def _draw_map_and_sites(self, surface, game: Game, rect: pygame.Rect) -> int:
         y = self._section_title(surface, "El mapa", rect.x, rect.y)
         costs = game.config.get("costo_terreno", {})
-        for terrain in (Terrain.PLAINS, Terrain.FOREST, Terrain.MOUNTAIN, Terrain.WATER):
+        terrains = (
+            Terrain.PLAINS, Terrain.FOREST, Terrain.FOREST_LIGHT,
+            Terrain.MOUNTAIN, Terrain.MOUNTAIN_LIGHT, Terrain.MARSH, Terrain.WATER,
+        )
+        for terrain in terrains:
             sprite = self._terrain.get(terrain)
             if sprite is not None:
                 surface.blit(sprite, (rect.x, y))
@@ -208,6 +225,9 @@ class HelpOverlay:
                 detail = "intransitable (solo por puentes)"
             else:
                 detail = f"costo de movimiento {costs.get(terrain.value, '?')}"
+                extra = TERRAIN_DETAIL.get(terrain)
+                if extra:
+                    detail += f" — {extra}"
             surface.blit(self.font.render(name, True, theme.TEXT), (rect.x + 52, y + 4))
             surface.blit(
                 self.small_font.render(detail, True, theme.TEXT_DIM), (rect.x + 200, y + 6)

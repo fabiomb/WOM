@@ -100,7 +100,7 @@ def _nets(host_s, clients_s, games):
 
 
 def test_lockstep_two_players_stay_in_sync():
-    games = [_new_game(1), _new_game(1)]
+    games = [_new_game(2), _new_game(2)]  # seed con combate dentro de 60 turnos
     assert games[0].to_dict() == games[1].to_dict()
     server, host_s, clients_s = _playing_group(2)
     nets = _nets(host_s, clients_s, games)

@@ -1,7 +1,7 @@
 """Tests del autotiling del agua (wom/ui/tiling.py, puro sin pygame)."""
 
-from wom.core.worldmap import CHAR_TO_TERRAIN, WorldMap
-from wom.ui.tiling import water_corners, water_tile
+from wom.core.worldmap import CHAR_TO_TERRAIN, Terrain, WorldMap
+from wom.ui.tiling import dry_corners, dry_edges, ink_group, water_corners, water_tile
 
 
 def _world(rows: list[str]) -> WorldMap:
@@ -123,3 +123,52 @@ def test_esquina_convive_con_orilla_recta():
     ])
     assert water_tile(world, (1, 1)) == "water_ne"
     assert water_corners(world, (1, 1)) == {"water_corner_sw"}
+
+
+# --- autotiling de terreno seco (bordes fluidos) --------------------------
+
+
+def test_dry_edges_el_terreno_dominante_derrama_sobre_el_menor():
+    # bosque (prioridad alta) al este de una llanura: la llanura recibe el borde
+    world = _world([
+        "pf",
+        "pp",
+    ])
+    assert dry_edges(world, (0, 0)) == [("e", Terrain.FOREST)]
+    # el bosque, más dominante, no recibe borde de la llanura
+    assert dry_edges(world, (1, 0)) == []
+
+
+def test_dry_edges_ignora_el_agua():
+    # el agua la maneja el autotiling de costa: no genera borde seco
+    world = _world([
+        "pw",
+        "pp",
+    ])
+    assert dry_edges(world, (0, 0)) == []
+    assert dry_edges(world, (1, 0)) == []  # el agua tampoco recibe bordes secos
+
+
+def test_dry_corners_punta_en_diagonal():
+    # bosque solo en la diagonal NE de la llanura (ortogonales son llanura)
+    world = _world([
+        "ppf",
+        "ppp",
+        "ppp",
+    ])
+    assert dry_corners(world, (1, 1)) == [("ne", Terrain.FOREST)]
+    # si el ortogonal ya es bosque, no hay esquina (lo cubre el borde recto)
+    world2 = _world([
+        "pff",
+        "ppp",
+        "ppp",
+    ])
+    assert dry_corners(world2, (1, 1)) == []
+
+
+def test_ink_group_agrupa_variantes():
+    # las variantes livianas comparten grupo con su feature; el puente, con agua
+    assert ink_group(Terrain.FOREST) == ink_group(Terrain.FOREST_LIGHT)
+    assert ink_group(Terrain.MOUNTAIN) == ink_group(Terrain.MOUNTAIN_LIGHT)
+    assert ink_group(Terrain.WATER) == ink_group(Terrain.BRIDGE_H)
+    assert ink_group(Terrain.PLAINS) != ink_group(Terrain.FOREST)

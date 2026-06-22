@@ -18,6 +18,12 @@ class Terrain(str, Enum):
     WATER = "water"  # intransitable
     BRIDGE_H = "bridge_h"  # puente sobre el agua, transitable (tablones E-O)
     BRIDGE_V = "bridge_v"  # ídem, tablones N-S
+    # Variantes "livianas" y pantano. El value coincide con el nombre del PNG
+    # (forest-less/mountain-less/marshes) y con la clave en los configs
+    # (costo_terreno, bonus_terreno).
+    FOREST_LIGHT = "forest-less"  # bosque ralo: sin penalidad de movimiento
+    MOUNTAIN_LIGHT = "mountain-less"  # colina: leve costo de movimiento
+    MARSH = "marshes"  # pantano: costoso salvo para partisanos, solo junto al agua
 
 
 @dataclass
@@ -149,5 +155,8 @@ TERRAIN_TO_CHAR = {
     Terrain.WATER: "w",
     Terrain.BRIDGE_H: "h",
     Terrain.BRIDGE_V: "v",
+    Terrain.FOREST_LIGHT: "l",
+    Terrain.MOUNTAIN_LIGHT: "n",
+    Terrain.MARSH: "s",
 }
 CHAR_TO_TERRAIN = {c: t for t, c in TERRAIN_TO_CHAR.items()}

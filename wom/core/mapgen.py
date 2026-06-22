@@ -4,7 +4,10 @@ El terreno se genera por *features* coherentes en lugar de ruido tile a
 tile: cadenas montañosas (caminatas con dirección dominante y serpenteo),
 manchas de bosque (crecimiento desde semillas), lagos (manchas de agua) y
 ríos serpenteantes que cruzan el mapa dejando vados transitables para no
-cortar la conectividad.
+cortar la conectividad. Sobre esa base se tallan en la llanura las variantes
+"livianas" y el pantano: bosque ralo (forest-less) en el borde de los bosques
+y suelto, colinas (mountain-less) alrededor de las montañas y ocasionales, y
+pantano (marshes) solo en la llanura pegada al agua.
 
 Garantías que cumple el generador:
 - Cada jugador arranca con su fuerte inicial en una zona alejada del resto
@@ -33,6 +36,19 @@ TERRAIN_TARGETS = {
     Terrain.MOUNTAIN: 0.15,
     Terrain.WATER: 0.10,
 }
+
+# Variantes "livianas" y pantano: se tallan de la llanura adyacente a su
+# feature (no se listan en TERRAIN_TARGETS porque su cantidad depende del
+# perímetro de bosques/montañas/agua ya pintados). La fracción `borde` se
+# pinta pegada a la feature; `libre` son manchas sueltas por el mapa (el
+# pantano solo aparece junto al agua, así que no tiene parte libre).
+EDGE_TARGETS = {
+    Terrain.FOREST_LIGHT: {"feature": Terrain.FOREST, "borde": 0.030, "libre": 0.012},
+    Terrain.MOUNTAIN_LIGHT: {"feature": Terrain.MOUNTAIN, "borde": 0.028, "libre": 0.008},
+    Terrain.MARSH: {"feature": Terrain.WATER, "borde": 0.035, "libre": 0.0},
+}
+
+_ORTHO = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
 MAX_ATTEMPTS = 50
 NO_WATER_AFTER = 40  # a partir de este intento se genera sin agua
@@ -72,6 +88,7 @@ def generate_map(params: MapParams, rng: random.Random) -> WorldMap:
         world = _coherent_terrain(params, rng, with_water=attempt < NO_WATER_AFTER)
         if not _place_features(world, params, rng):
             continue
+        _drop_orphan_marshes(world)
         if _is_fully_connected(world):
             return world
     raise RuntimeError("no se pudo generar un mapa conectado")  # pragma: no cover
@@ -88,7 +105,77 @@ def _coherent_terrain(
     _paint_forest_blobs(world, int(area * TERRAIN_TARGETS[Terrain.FOREST]), rng)
     if with_water:
         _paint_water(world, int(area * TERRAIN_TARGETS[Terrain.WATER]), rng)
+    _paint_edge_variants(world, area, rng)
     return world
+
+
+def _paint_edge_variants(world: WorldMap, area: int, rng: random.Random) -> None:
+    """Talla en la llanura las variantes livianas y el pantano.
+
+    Para cada variante: primero una banda pegada a su feature (bosque ralo en
+    el borde de los bosques, colinas alrededor de las montañas, pantano junto
+    al agua) y luego, salvo el pantano, algunas manchas sueltas por el mapa.
+    Todo es transitable, así que no afecta la conectividad. Si no hay agua
+    (mapas del fallback sin agua) no hay llanura costera y el pantano no se
+    genera, que es justo lo que se quiere (solo cerca del agua).
+    """
+    for light, spec in EDGE_TARGETS.items():
+        feature = spec["feature"]
+        seeds = _plains_adjacent_to(world, feature)
+        rng.shuffle(seeds)
+        # El pantano no debe alejarse del agua: su crecimiento se confina a la
+        # llanura costera (a un paso del agua, incluyendo la banda apenas
+        # interior que conecta los tiles de orilla entre sí).
+        allowed = set(seeds) if light is Terrain.MARSH else None
+        painted = 0
+        target_edge = int(area * spec["borde"])
+        for seed in seeds:
+            if painted >= target_edge:
+                break
+            painted += _grow_blob(world, seed, rng.randint(1, 4), light, rng, allowed)
+        # Manchas sueltas por el mapa (forest-less/mountain-less). El pantano
+        # no tiene parte libre: se queda en la banda costera (allowed).
+        target_free = int(area * spec["libre"])
+        attempts = 0
+        while target_free and painted < target_edge + target_free and attempts < 80:
+            attempts += 1
+            seed = (rng.randrange(world.width), rng.randrange(world.height))
+            painted += _grow_blob(world, seed, rng.randint(2, 5), light, rng)
+
+
+def _drop_orphan_marshes(world: WorldMap) -> None:
+    """Devuelve a llanura los pantanos que quedaron sin agua adyacente.
+
+    Al colocar fuertes/pueblos, un tile de agua pegado a un pantano pudo
+    volverse llanura, dejando ese pantano lejos del agua. Es raro (~1%), pero
+    rompe la regla de que el pantano solo existe junto al agua, así que se
+    limpia (a llanura, siempre transitable; no afecta la conectividad)."""
+    for y in range(world.height):
+        for x in range(world.width):
+            if world.tiles[y][x] is not Terrain.MARSH:
+                continue
+            if not any(
+                world.in_bounds((x + dx, y + dy))
+                and world.tiles[y + dy][x + dx] is Terrain.WATER
+                for dx, dy in _ORTHO
+            ):
+                world.tiles[y][x] = Terrain.PLAINS
+
+
+def _plains_adjacent_to(world: WorldMap, feature: Terrain) -> list[Coord]:
+    """Tiles de llanura con al menos un vecino ortogonal del terreno `feature`."""
+    result: list[Coord] = []
+    for y in range(world.height):
+        for x in range(world.width):
+            if world.tiles[y][x] is not Terrain.PLAINS:
+                continue
+            if any(
+                world.in_bounds((x + dx, y + dy))
+                and world.tiles[y + dy][x + dx] is feature
+                for dx, dy in _ORTHO
+            ):
+                result.append((x, y))
+    return result
 
 
 def _paint(world: WorldMap, pos: Coord, terrain: Terrain) -> int:
@@ -137,13 +224,23 @@ def _paint_forest_blobs(world: WorldMap, target: int, rng: random.Random) -> Non
 
 
 def _grow_blob(
-    world: WorldMap, start: Coord, size: int, terrain: Terrain, rng: random.Random
+    world: WorldMap,
+    start: Coord,
+    size: int,
+    terrain: Terrain,
+    rng: random.Random,
+    allowed: set[Coord] | None = None,
 ) -> int:
-    """Crece una mancha desde `start` tomando tiles de llanura adyacentes."""
+    """Crece una mancha desde `start` tomando tiles de llanura adyacentes.
+
+    Si se pasa `allowed`, la mancha no se expande fuera de ese conjunto (p. ej.
+    el pantano, que no debe alejarse de la costa)."""
     frontier = [start]
     painted = 0
     while frontier and painted < size:
         x, y = frontier.pop(rng.randrange(len(frontier)))
+        if allowed is not None and (x, y) not in allowed:
+            continue
         if not _paint(world, (x, y), terrain):
             continue
         painted += 1

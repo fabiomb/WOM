@@ -42,13 +42,16 @@ El motor resuelve cada turno en este orden fijo:
 El mapa es una grilla de casilleros (tiles). Cada tile tiene un **terreno** que
 afecta cuánto cuesta moverse por él y los bonus de combate:
 
-| Terreno      | Costo de movimiento | Notas de combate |
-|--------------|---------------------|------------------|
-| **Llanura**  | 1                   | Terreno abierto; favorece a caballeros y soldados. |
-| **Bosque**   | 2                   | Cubre a partisanos y arqueros; estorba a la caballería. |
-| **Montaña**  | 3                   | Lo mejor para arqueros y partisanos; pésimo para caballeros. |
-| **Agua**     | intransitable       | Solo se cruza por puentes. |
-| **Puente**   | 1                   | Cruza el agua, pero es un **túnel de un solo eje**. |
+| Terreno         | Costo de movimiento | Notas de combate |
+|-----------------|---------------------|------------------|
+| **Llanura**     | 1                   | Terreno abierto; favorece a caballeros y soldados. |
+| **Bosque**      | 2                   | Cubre a partisanos y arqueros; estorba a la caballería. |
+| **Bosque ralo** | 1                   | Versión liviana del bosque (no frena el avance); cubre al partisano y estorba a caballero y arquero en combate. Aparece en los bordes de los bosques y suelto. |
+| **Montaña**     | 3                   | Lo mejor para arqueros y partisanos; pésimo para caballeros. |
+| **Colina**      | 2                   | Montaña liviana: leve costo para todos; la ventaja de combate es solo de arqueros y partisanos. Rodea las montañas y aparece ocasional. |
+| **Pantano**     | 3 (1 si el ejército es solo de partisanos) | Frena a todos salvo a los partisanos (que además pelean mejor ahí); estorba a la caballería. Solo aparece junto al agua. |
+| **Agua**        | intransitable       | Solo se cruza por puentes. |
+| **Puente**      | 1                   | Cruza el agua, pero es un **túnel de un solo eje**. |
 
 **Puentes:** un puente horizontal solo conecta este–oeste y uno vertical solo
 norte–sur. No se puede entrar ni salir por el costado: hay que cruzarlo derecho,

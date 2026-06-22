@@ -14,6 +14,34 @@ from wom.core.worldmap import Coord, WorldMap
 INF = float("inf")
 
 
+def army_terrain_costs(
+    base_costs: dict[str, int],
+    composition: dict[str, int],
+    class_overrides: dict[str, dict[str, int]] | None = None,
+) -> dict[str, int]:
+    """Costo de terreno efectivo para un ejército concreto.
+
+    Algunos terrenos cuestan distinto según la clase (p. ej. el pantano, que
+    solo los partisanos cruzan sin penalidad): `class_overrides[terreno][clase]`
+    reemplaza el costo base para esa clase. Como el ejército avanza al ritmo de
+    su clase más lenta, el costo del ejército en ese terreno es el MÁXIMO de los
+    costos por clase presente (un ejército de puros partisanos cruza el pantano;
+    uno mixto paga la penalidad). Sin overrides devuelve `base_costs` tal cual.
+    """
+    if not class_overrides:
+        return base_costs
+    present = [c for c, n in composition.items() if n > 0]
+    if not present:
+        return base_costs
+    costs = dict(base_costs)
+    for terrain, per_class in class_overrides.items():
+        base = base_costs.get(terrain)
+        if base is None:
+            continue
+        costs[terrain] = max(per_class.get(c, base) for c in present)
+    return costs
+
+
 def dijkstra(
     world: WorldMap,
     start: Coord,

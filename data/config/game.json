@@ -46,5 +46,11 @@
   },
   "turnos_limite_default": 50,
   "turnos_cruz": 5,
-  "costo_terreno": { "plains": 1, "forest": 2, "mountain": 3, "bridge_h": 1, "bridge_v": 1 }
+  "costo_terreno": {
+    "plains": 1, "forest": 2, "mountain": 3, "bridge_h": 1, "bridge_v": 1,
+    "forest-less": 1, "mountain-less": 2, "marshes": 3
+  },
+  "costo_terreno_clase": {
+    "marshes": { "partisano": 1 }
+  }
 }

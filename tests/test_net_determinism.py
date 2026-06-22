@@ -20,7 +20,7 @@ from wom.net.state_hash import state_digest
 # camino con RNG, lo más sensible al determinismo. La seed 1 produce combate y
 # termina la partida en pocos turnos.
 LOCKSTEP_LEVEL = "facil"
-LOCKSTEP_SEED = 1
+LOCKSTEP_SEED = 2  # seed cuyo mapa hace que las AIs choquen dentro de 60 turnos
 
 
 def _new_game(seed: int) -> Game:

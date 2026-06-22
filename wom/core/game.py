@@ -46,6 +46,7 @@ from wom.core.battle import (
 )
 from wom.core.config import UnitClass, load_game_config, load_unit_classes
 from wom.core.mapgen import MapParams, generate_map
+from wom.core.pathfind import army_terrain_costs
 from wom.core.orders import (
     CreateArmyOrder,
     MergeArmyOrder,
@@ -278,10 +279,12 @@ class Game:
         self._resupply(fort, army)
 
     def _move_armies(self) -> None:
-        terrain_costs = self.config["costo_terreno"]
+        base_costs = self.config["costo_terreno"]
+        class_costs = self.config.get("costo_terreno_clase")
         for army in sorted(self.armies, key=lambda a: a.id):
             if army.is_destroyed or not army.path:
                 continue
+            terrain_costs = army_terrain_costs(base_costs, army.composition, class_costs)
             points = army.speed(self.classes)
             while army.path and points > 0:
                 step = army.path[0]

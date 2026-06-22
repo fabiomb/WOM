@@ -7,11 +7,18 @@ import pygame
 from wom.core.army import Army
 from wom.core.game import Game
 from wom.core.worldmap import Coord, Terrain
-from wom.ui import theme
-from wom.ui.assets import Assets
+from wom.ui import texture, theme
+from wom.ui.assets import Assets, load_image
 from wom.ui.camera import Camera
 from wom.ui.pathline import arrow_head, smooth_path, trim_tail
-from wom.ui.tiling import WATERLIKE, water_corners, water_tile
+from wom.ui.tiling import (
+    WATERLIKE,
+    dry_corners,
+    dry_edges,
+    ink_group,
+    water_corners,
+    water_tile,
+)
 
 
 class MapRenderer:
@@ -32,9 +39,19 @@ class MapRenderer:
         )
         self._assets_by_size: dict[int, Assets] = {assets.tile_size: assets}
         self._fonts_by_size: dict[int, pygame.font.Font] = {}
+        # Caches del estilo vintage (se rellenan perezosamente):
+        #  - overlays de borde compuestos (terreno+lado+zoom),
+        #  - papel y viñeta por tamaño de área.
+        self._edge_overlays: dict[tuple[Terrain, str, int], pygame.Surface] = {}
+        self._paper_cache: dict[tuple[int, int], pygame.Surface | None] = {}
+        self._vignette_cache: dict[tuple[int, int], pygame.Surface] = {}
+        self._compass_cache: dict[int, pygame.Surface] = {}
+        self._ink_overlay_cache: dict[tuple[int, int], pygame.Surface] = {}
+        self._paper_src = load_image("paper")
+        self._compass_src = load_image("compass")
         # El terreno no cambia durante la partida: la variante de costa de
-        # cada tile de agua se calcula una sola vez (el editor la recalcula a
-        # mano con refresh_terrain cuando pinta).
+        # cada tile de agua, los bordes secos y los contornos de tinta se
+        # calculan una sola vez (el editor los recalcula con refresh_terrain).
         self._world = world
         self.refresh_terrain()
 
@@ -50,14 +67,50 @@ class MapRenderer:
         world = self._world
         self._water_tiles = {}
         self._water_corners = {}
+        self._dry_edges: dict[Coord, list[tuple[str, Terrain]]] = {}
         for y in range(world.height):
             for x in range(world.width):
-                if world.tiles[y][x] not in WATERLIKE:
+                if world.tiles[y][x] in WATERLIKE:
+                    self._water_tiles[(x, y)] = water_tile(world, (x, y))
+                    corners = water_corners(world, (x, y))
+                    if corners:
+                        self._water_corners[(x, y)] = corners
                     continue
-                self._water_tiles[(x, y)] = water_tile(world, (x, y))
-                corners = water_corners(world, (x, y))
-                if corners:
-                    self._water_corners[(x, y)] = corners
+                # Terreno seco: bordes (rectos + diagonales) hacia el terreno
+                # vecino dominante, para fundirlos sin cortar en cuadrado.
+                edges = dry_edges(world, (x, y)) + dry_corners(world, (x, y))
+                if edges:
+                    self._dry_edges[(x, y)] = edges
+        self._ink_segments = self._compute_ink_segments(world)
+
+    def _compute_ink_segments(self, world) -> list[list[tuple[float, float]]]:
+        """Segmentos de contorno (en coords de tile) entre grupos cartográficos
+        distintos: costas, lindes de bosque, pie de montaña, borde de pantano.
+        Cada borde compartido se quiebra en un punto medio con jitter
+        determinista para que la línea parezca dibujada a mano."""
+        segments: list[list[tuple[float, float]]] = []
+        for y in range(world.height):
+            for x in range(world.width):
+                group = ink_group(world.tiles[y][x])
+                if x + 1 < world.width and ink_group(world.tiles[y][x + 1]) != group:
+                    segments.append(self._ink_edge((x + 1, y), (x + 1, y + 1), axis=0))
+                if y + 1 < world.height and ink_group(world.tiles[y + 1][x]) != group:
+                    segments.append(self._ink_edge((x, y + 1), (x + 1, y + 1), axis=1))
+        return segments
+
+    @staticmethod
+    def _ink_edge(p0: Coord, p1: Coord, axis: int) -> list[tuple[float, float]]:
+        """Polilínea de 3 puntos para un borde compartido, con el medio corrido
+        perpendicular (jitter por hash → trazo ondulado, no recto)."""
+        frac = (texture.tile_hash(p0[0], p0[1], salt=5) % 1000) / 999.0
+        offset = (frac - 0.5) * 0.24  # amplitud del meandro, en tiles
+        mx = (p0[0] + p1[0]) / 2
+        my = (p0[1] + p1[1]) / 2
+        if axis == 0:  # borde vertical: corre en x
+            mid = (mx + offset, my)
+        else:  # borde horizontal: corre en y
+            mid = (mx, my + offset)
+        return [(float(p0[0]), float(p0[1])), mid, (float(p1[0]), float(p1[1]))]
 
     @property
     def tile_size(self) -> int:
@@ -99,6 +152,12 @@ class MapRenderer:
     def tile_center(self, pos: Coord) -> tuple[int, int]:
         return self.tile_rect(pos).center
 
+    def _tile_point(self, tx: float, ty: float) -> tuple[int, int]:
+        """Punto de pantalla de una coordenada de tile fraccionaria (esquinas
+        de tile, para los contornos de tinta)."""
+        ts = self.tile_size
+        return (round(self.origin[0] + tx * ts), round(self.origin[1] + ty * ts))
+
     def screen_to_tile(self, point: tuple[int, int], game: Game) -> Coord | None:
         if not self.area.collidepoint(point):
             return None  # con zoom, un punto del HUD podría mapear a un tile
@@ -137,6 +196,7 @@ class MapRenderer:
         las cruces del turno recién jugado: la animación de batalla todavía
         no reveló esas muertes."""
         self._draw_terrain(surface, game)
+        self._draw_vintage(surface, game)
         self._draw_sites(surface, game)
         self._draw_crosses(surface, game, hide_new=hide_new_crosses)
         self._draw_paths(surface, game, selected_id, pending_paths)
@@ -159,13 +219,149 @@ class MapRenderer:
                 terrain = game.world.tiles[y][x]
                 variant = self._water_tiles.get((x, y))
                 if variant is None:  # terreno seco (pradera/bosque/montaña)
-                    surface.blit(assets.terrain[terrain], rect)
+                    styles = assets.terrain_styles[terrain]
+                    idx = texture.style_index(x, y, len(styles))
+                    surface.blit(styles[idx], rect)
+                    for side, neighbor in self._dry_edges.get((x, y), ()):
+                        surface.blit(self._edge_overlay(neighbor, side), rect)
                     continue
                 surface.blit(assets.water[variant], rect)  # agua autotileada
                 for corner in self._water_corners.get((x, y), ()):
                     surface.blit(assets.water_corners[corner], rect)
                 if terrain is Terrain.BRIDGE_H or terrain is Terrain.BRIDGE_V:
                     surface.blit(assets.terrain[terrain], rect)  # tablón encima
+
+    def _edge_overlay(self, neighbor: Terrain, side: str) -> pygame.Surface:
+        """Textura del terreno vecino recortada por la máscara del lado `side`
+        (banda recta o esquina). Cacheado por (terreno, lado, zoom)."""
+        key = (neighbor, side, self.tile_size)
+        cached = self._edge_overlays.get(key)
+        if cached is None:
+            assets = self.assets
+            ts = self.tile_size
+            # Sobre una superficie con alfa: la textura (opaca) del vecino y
+            # encima la máscara, que recorta el alfa a la banda del borde.
+            comp = pygame.Surface((ts, ts), pygame.SRCALPHA)
+            comp.blit(assets.terrain[neighbor], (0, 0))
+            comp.blit(assets.edge_masks[side], (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            self._edge_overlays[key] = comp
+            cached = comp
+        return cached
+
+    def _draw_vintage(self, surface: pygame.Surface, game: Game) -> None:
+        """Capa de estilo "pergamino": contornos de tinta sobre los límites de
+        terreno + textura de papel + viñeta. Se pinta sobre el terreno y antes
+        de sitios/ejércitos, para que esos queden nítidos por encima."""
+        self._draw_ink_contours(surface)
+        ts = self.tile_size
+        world = self._world
+        map_rect = pygame.Rect(
+            self.origin[0], self.origin[1], world.width * ts, world.height * ts
+        ).clip(self.area)
+        if map_rect.width <= 0 or map_rect.height <= 0:
+            return
+        prev_clip = surface.get_clip()
+        surface.set_clip(map_rect)  # papel/viñeta solo sobre el mapa, no el margen
+        paper = self._paper_overlay()
+        if paper is not None:
+            surface.blit(paper, self.area.topleft)
+        surface.blit(self._vignette(), self.area.topleft)
+        self._draw_chrome(surface, map_rect)
+        surface.set_clip(prev_clip)
+
+    def _draw_chrome(self, surface: pygame.Surface, map_rect: pygame.Rect) -> None:
+        """Adornos cartográficos sobre el mapa: marco de tinta y rosa de los
+        vientos (ambos reemplazables por arte propio vía theme/compass.png)."""
+        if theme.MAP_FRAME:
+            inset = max(3, self.tile_size // 12)
+            pygame.draw.rect(surface, theme.INK, map_rect.inflate(-2 * inset, -2 * inset), 2)
+            pygame.draw.rect(
+                surface, theme.INK, map_rect.inflate(-2 * inset - 6, -2 * inset - 6), 1
+            )
+        if self._compass_src is not None:
+            size = int(min(map_rect.width, map_rect.height) * theme.COMPASS_SIZE_FRAC)
+            size = max(48, min(size, 220))
+            compass = self._compass_cache.get(size)
+            if compass is None:
+                compass = pygame.transform.smoothscale(self._compass_src, (size, size))
+                compass.fill((255, 255, 255, 210), special_flags=pygame.BLEND_RGBA_MULT)
+                self._compass_cache[size] = compass
+            margin = max(6, size // 6)
+            pos = (map_rect.right - size - margin, map_rect.bottom - size - margin)
+            surface.blit(compass, pos)
+
+    def _draw_ink_contours(self, surface: pygame.Surface) -> None:
+        alpha = int(255 * theme.INK_STRENGTH)
+        if alpha <= 0 or not self._ink_segments:  # contornos apagados
+            return
+        width = max(1, self.tile_size // 32)
+        if alpha >= 255:  # tinta plena: dibujar directo (sin overlay)
+            for seg in self._ink_segments:
+                points = [self._tile_point(tx, ty) for tx, ty in seg]
+                pygame.draw.lines(surface, theme.INK, False, points, width)
+            return
+        # Opacidad parcial: dibujar sobre un overlay con alfa y blittearlo una
+        # vez (los segmentos comparten vértices; pygame.draw sobreescribe, así
+        # que los cruces no se oscurecen al duplicarse).
+        ox, oy = self.area.topleft
+        overlay = self._ink_overlay()
+        color = (*theme.INK, alpha)
+        for seg in self._ink_segments:
+            points = [
+                (round(self.origin[0] + tx * self.tile_size - ox),
+                 round(self.origin[1] + ty * self.tile_size - oy))
+                for tx, ty in seg
+            ]
+            pygame.draw.lines(overlay, color, False, points, width)
+        surface.blit(overlay, self.area.topleft)
+
+    def _ink_overlay(self) -> pygame.Surface:
+        """Overlay transparente del tamaño del área para los contornos con
+        opacidad parcial. Se reutiliza (limpiándolo) entre frames."""
+        key = (self.area.width, self.area.height)
+        surf = self._ink_overlay_cache.get(key)
+        if surf is None:
+            surf = pygame.Surface((self.area.width, self.area.height), pygame.SRCALPHA)
+            self._ink_overlay_cache[key] = surf
+        else:
+            surf.fill((0, 0, 0, 0))
+        return surf
+
+    def _paper_overlay(self) -> pygame.Surface | None:
+        """Textura de papel escalada al área, con su intensidad ya aplicada
+        (alfa × PAPER_STRENGTH). Cacheada por tamaño de área."""
+        if self._paper_src is None or theme.PAPER_STRENGTH <= 0:
+            return None
+        key = (self.area.width, self.area.height)
+        cached = self._paper_cache.get(key)
+        if cached is None:
+            scaled = pygame.transform.smoothscale(
+                self._paper_src, (self.area.width, self.area.height)
+            ).convert_alpha()
+            alpha = int(255 * theme.PAPER_STRENGTH)
+            scaled.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
+            self._paper_cache[key] = scaled
+            cached = scaled
+        return cached
+
+    def _vignette(self) -> pygame.Surface:
+        """Oscurecimiento cálido de los bordes (scroll quemado), cacheado por
+        tamaño de área. Anillos de borde con alfa creciente hacia el margen."""
+        key = (self.area.width, self.area.height)
+        cached = self._vignette_cache.get(key)
+        if cached is not None:
+            return cached
+        w, h = self.area.width, self.area.height
+        surf = pygame.Surface((w, h), pygame.SRCALPHA)
+        margin = max(8, min(w, h) // 5)
+        max_alpha = int(255 * theme.VIGNETTE_STRENGTH)
+        for i in range(margin):
+            alpha = int(max_alpha * (1 - i / margin) ** 2)
+            if alpha <= 0:
+                continue
+            pygame.draw.rect(surf, (28, 20, 12, alpha), (i, i, w - 2 * i, h - 2 * i), 1)
+        self._vignette_cache[key] = surf
+        return surf
 
     def _draw_sites(self, surface: pygame.Surface, game: Game) -> None:
         for kind, sites in (("fort", game.world.forts), ("town", game.world.towns)):

@@ -49,7 +49,7 @@ from wom.core.orders import (
     SplitArmyOrder,
     TransferTroopsOrder,
 )
-from wom.core.pathfind import shortest_path
+from wom.core.pathfind import army_terrain_costs, shortest_path
 from wom.core.victory import VictoryResult
 from wom.core.worldmap import Coord
 from wom.persistence.savegame import save_game
@@ -550,9 +550,13 @@ class GameScreen:
         start = current[-1] if current else army_pos
         if target == start:
             return
-        segment = shortest_path(
-            self.game.world, start, target, self.game.config["costo_terreno"]
+        army = self.game.army_by_id(army_id)
+        terrain_costs = army_terrain_costs(
+            self.game.config["costo_terreno"],
+            army.composition if army else {},
+            self.game.config.get("costo_terreno_clase"),
         )
+        segment = shortest_path(self.game.world, start, target, terrain_costs)
         if segment:
             self.pending_paths[army_id] = current + segment
 

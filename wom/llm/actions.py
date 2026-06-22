@@ -31,7 +31,7 @@ from wom.core.orders import (
     SplitArmyOrder,
     TransferTroopsOrder,
 )
-from wom.core.pathfind import shortest_path
+from wom.core.pathfind import army_terrain_costs, shortest_path
 from wom.core.worldmap import Coord
 
 # Sinónimos tolerados para las claves (los modelos pequeños no siempre respetan
@@ -97,7 +97,11 @@ def _move(raw: dict, game: Game, player_id: int) -> MoveOrder:
         raise _Invalid(f"move #{army.id}: destino {dest} es intransitable (agua)")
     if dest == army.position:
         raise _Invalid(f"move #{army.id}: ya está en {dest}")
-    path = shortest_path(game.world, army.position, dest, game.config["costo_terreno"])
+    terrain_costs = army_terrain_costs(
+        game.config["costo_terreno"], army.composition,
+        game.config.get("costo_terreno_clase"),
+    )
+    path = shortest_path(game.world, army.position, dest, terrain_costs)
     if not path:
         raise _Invalid(f"move #{army.id}: no hay camino hasta {dest}")
     return MoveOrder(army_id=army.id, path=tuple(path))

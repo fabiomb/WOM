@@ -4,7 +4,7 @@ un `.wom` compartible.
 La pantalla mantiene un `Game` interno como buffer de edición (un mundo de
 pura pradera al empezar) y **reutiliza `MapRenderer`** para dibujar el lienzo
 con el mismo aspecto que la partida (autotiling de agua incluido). La sidebar
-es una paleta tipo editor gráfico: terreno (los 6 `Terrain`), sitios (fuerte,
+es una paleta tipo editor gráfico: terreno (los `Terrain`), sitios (fuerte,
 pueblo), tropas (ejército) y borrador, todos aplicados con el **dueño** activo
 (Neutral / Jugador 1 / Jugador 2). El menú ofrece Nuevo, Guardar, Cargar,
 Generar aleatorio y Volver.
@@ -45,7 +45,10 @@ from wom.ui.renderer import MapRenderer
 TERRAIN_TOOLS: list[tuple[Terrain, str]] = [
     (Terrain.PLAINS, "Pradera"),
     (Terrain.FOREST, "Bosque"),
+    (Terrain.FOREST_LIGHT, "Bosque ralo"),
     (Terrain.MOUNTAIN, "Montaña"),
+    (Terrain.MOUNTAIN_LIGHT, "Colina"),
+    (Terrain.MARSH, "Pantano"),
     (Terrain.WATER, "Agua"),
     (Terrain.BRIDGE_H, "Puente E-O"),
     (Terrain.BRIDGE_V, "Puente N-S"),

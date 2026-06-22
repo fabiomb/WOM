@@ -94,3 +94,99 @@ def water_corners(world: WorldMap, pos: Coord) -> frozenset[str]:
         and not _is_land(world, (x + o2[0], y + o2[1]))
         and _is_land(world, (x + d[0], y + d[1]))
     )
+
+
+# --- autotiling de terreno seco (bordes fluidos entre terrenos) ------------
+# Prioridad de "dominancia" visual: el terreno más alto derrama su textura,
+# suavizada, sobre el vecino más bajo (como la costa del agua hace con la
+# tierra). El agua/puentes quedan fuera: ya los resuelve el autotiling de costa.
+TERRAIN_PRIORITY: dict[Terrain, int] = {
+    Terrain.PLAINS: 0,
+    Terrain.MARSH: 1,
+    Terrain.FOREST_LIGHT: 2,
+    Terrain.MOUNTAIN_LIGHT: 3,
+    Terrain.FOREST: 4,
+    Terrain.MOUNTAIN: 5,
+}
+
+# Esquinas para el derrame diagonal: dos ortogonales + la diagonal (Δx, Δy).
+_DRY_CORNERS: dict[str, tuple[Coord, Coord, Coord]] = {
+    "ne": ((0, -1), (1, 0), (1, -1)),
+    "nw": ((0, -1), (-1, 0), (-1, -1)),
+    "se": ((0, 1), (1, 0), (1, 1)),
+    "sw": ((0, 1), (-1, 0), (-1, 1)),
+}
+
+
+def _dry_priority(world: WorldMap, pos: Coord) -> int | None:
+    """Prioridad del terreno seco en `pos`, o None si está fuera del mapa o es
+    agua/puente (que no participa del derrame de terreno seco)."""
+    if not world.in_bounds(pos):
+        return None
+    terrain = world.terrain_at(pos)
+    if terrain in _WATERLIKE:
+        return None
+    return TERRAIN_PRIORITY.get(terrain, 0)
+
+
+def dry_edges(world: WorldMap, pos: Coord) -> list[tuple[str, Terrain]]:
+    """Bordes a superponer sobre el tile seco `pos`: por cada vecino ortogonal
+    de MAYOR prioridad, `(lado, terreno_del_vecino)`.
+
+    El renderer pinta la textura del vecino enmascarada por ese lado, así el
+    terreno dominante se funde con el más bajo en vez de cortar en cuadrado.
+    Devuelve [] para agua/puentes (los maneja el autotiling de costa)."""
+    base = _dry_priority(world, pos)
+    if base is None:
+        return []
+    x, y = pos
+    edges: list[tuple[str, Terrain]] = []
+    for side, (dx, dy) in _DIRECTIONS.items():
+        npos = (x + dx, y + dy)
+        npri = _dry_priority(world, npos)
+        if npri is not None and npri > base:
+            edges.append((side, world.terrain_at(npos)))
+    return edges
+
+
+def dry_corners(world: WorldMap, pos: Coord) -> list[tuple[str, Terrain]]:
+    """Derrame diagonal sobre `pos`: por cada esquina cuyo vecino diagonal es de
+    mayor prioridad y cuyos dos ortogonales NO lo son (una punta que asoma en
+    diagonal, no cubierta por un borde recto), `(esquina, terreno_diagonal)`."""
+    base = _dry_priority(world, pos)
+    if base is None:
+        return []
+    x, y = pos
+    corners: list[tuple[str, Terrain]] = []
+    for name, (o1, o2, d) in _DRY_CORNERS.items():
+        dpos = (x + d[0], y + d[1])
+        dpri = _dry_priority(world, dpos)
+        if dpri is None or dpri <= base:
+            continue
+        p1 = _dry_priority(world, (x + o1[0], y + o1[1]))
+        p2 = _dry_priority(world, (x + o2[0], y + o2[1]))
+        if (p1 is None or p1 <= base) and (p2 is None or p2 <= base):
+            corners.append((name, world.terrain_at(dpos)))
+    return corners
+
+
+# --- grupos para el contorno de tinta --------------------------------------
+# Clases cartográficas: una línea de tinta marca el límite entre dos grupos
+# distintos (costa, linde de bosque, pie de montaña, borde de pantano). Los
+# tiles dentro del mismo grupo no llevan contorno.
+_INK_GROUP: dict[Terrain, str] = {
+    Terrain.PLAINS: "plains",
+    Terrain.FOREST: "forest",
+    Terrain.FOREST_LIGHT: "forest",
+    Terrain.MOUNTAIN: "mountain",
+    Terrain.MOUNTAIN_LIGHT: "mountain",
+    Terrain.MARSH: "marsh",
+    Terrain.WATER: "water",
+    Terrain.BRIDGE_H: "water",
+    Terrain.BRIDGE_V: "water",
+}
+
+
+def ink_group(terrain: Terrain) -> str:
+    """Clase cartográfica de un terreno (para decidir dónde va el contorno)."""
+    return _INK_GROUP.get(terrain, "plains")

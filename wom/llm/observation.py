@@ -22,6 +22,9 @@ _TERRAIN_GLYPH = {
     Terrain.WATER: "~",
     Terrain.BRIDGE_H: "=",
     Terrain.BRIDGE_V: "=",
+    Terrain.FOREST_LIGHT: ",",
+    Terrain.MOUNTAIN_LIGHT: "n",
+    Terrain.MARSH: "%",
 }
 
 
@@ -150,7 +153,8 @@ def render_text(game: Game, player_id: int) -> str:
     lines.append(f"\nMapa {w}x{h} (x crece a la derecha, y hacia abajo):")
     lines.extend(obs["ascii_map"])
     lines.append(
-        "Leyenda: . llano  f bosque  ^ montaña  ~ agua  = puente | "
+        "Leyenda: . llano  f bosque  , bosque ralo  ^ montaña  n colina  "
+        "~ agua  % pantano  = puente | "
         "A ejército propio  E enemigo | F/X/+ fuerte propio/enemigo/neutral | "
         "T/Y/- pueblo propio/enemigo/neutral"
     )

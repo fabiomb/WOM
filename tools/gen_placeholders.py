@@ -24,6 +24,8 @@ Uso:
 
 from __future__ import annotations
 
+import math
+import random
 from pathlib import Path
 
 import pygame
@@ -35,6 +37,9 @@ TILES = {  # 64x64, color plano + letra
     "forest": (40, 100, 45),
     "mountain": (130, 120, 110),
     "water": (50, 90, 160),
+    "forest-less": (80, 140, 70),    # bosque ralo (verde más claro)
+    "mountain-less": (150, 140, 120),  # colina (gris más claro)
+    "marshes": (90, 120, 90),         # pantano (verde apagado)
 }
 UNITS = {  # 48x48
     "partisano": (200, 170, 60),
@@ -185,6 +190,95 @@ def _make_bridge(name: str, horizontal: bool, size: int, out_dir: Path) -> None:
     _save(surface, name, out_dir)
 
 
+def _make_paper(name: str, size: int, out_dir: Path) -> None:
+    """Textura de pergamino (RGBA): fibras y manchas marrones de baja opacidad
+    sobre un fondo casi transparente. El renderer la escala al área y la
+    superpone con su intensidad (PAPER_STRENGTH) para envejecer el mapa."""
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    rng = random.Random(20240101)
+    # Manchas suaves grandes (aguadas/foxing del papel).
+    for _ in range(70):
+        cx, cy = rng.randrange(size), rng.randrange(size)
+        radius = rng.randint(size // 10, size // 4)
+        tone = rng.randint(110, 150)
+        for r in range(radius, 0, -1):
+            alpha = int(48 * (1 - r / radius))
+            if alpha <= 0:
+                continue
+            pygame.draw.circle(surface, (tone, tone - 30, tone - 70, alpha), (cx, cy), r)
+    # Fibras finas (vetas del papel).
+    for _ in range(size * 6):
+        x, y = rng.randrange(size), rng.randrange(size)
+        length = rng.randint(3, 12)
+        horizontal = rng.random() < 0.5
+        end = (x + length, y) if horizontal else (x, y + length)
+        pygame.draw.line(surface, (95, 75, 48, rng.randint(20, 50)), (x, y), end)
+    _save(surface, name, out_dir)
+
+
+def _make_edge_mask(name: str, size: int, out_dir: Path) -> None:
+    """Máscara alfa de banda al norte: blanca y opaca arriba, se desvanece hacia
+    abajo (con un borde irregular para que el derrame no quede recto). El
+    renderer la rota/espeja para los otros lados."""
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    rng = random.Random(7)
+    base_band = size * 0.55
+    for x in range(size):
+        band = base_band + rng.randint(-size // 12, size // 12)
+        for y in range(size):
+            alpha = int(255 * max(0.0, 1 - y / band)) if band > 0 else 0
+            if alpha > 0:
+                surface.set_at((x, y), (255, 255, 255, alpha))
+    _save(surface, name, out_dir)
+
+
+def _make_corner_mask(name: str, size: int, out_dir: Path) -> None:
+    """Máscara alfa de esquina NE: opaca en el vértice nordeste, se desvanece
+    radialmente. El renderer la espeja para las otras esquinas."""
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    radius = size * 0.75
+    corner = (size - 1, 0)
+    for x in range(size):
+        for y in range(size):
+            dist = math.hypot(x - corner[0], y - corner[1])
+            alpha = int(255 * max(0.0, 1 - dist / radius))
+            if alpha > 0:
+                surface.set_at((x, y), (255, 255, 255, alpha))
+    _save(surface, name, out_dir)
+
+
+def _make_compass(name: str, size: int, out_dir: Path) -> None:
+    """Rosa de los vientos (RGBA, fondo transparente): 8 puntas con mitades
+    clara/oscura para el efecto en relieve, anillo y la 'N' al norte. Placeholder
+    cartográfico — el usuario lo reemplaza por su propio arte."""
+    surface = pygame.Surface((size, size), pygame.SRCALPHA)
+    cx, cy = size / 2, size / 2
+    radius = size * 0.38
+    ink = (70, 50, 32)
+    light = (165, 135, 92)
+
+    def spike(angle_deg: float, length: float, half: float) -> None:
+        a = math.radians(angle_deg)
+        d = (math.sin(a), -math.cos(a))  # 0° = norte (arriba)
+        perp = (-d[1], d[0])
+        tip = (cx + d[0] * length, cy + d[1] * length)
+        bl = (cx + perp[0] * half, cy + perp[1] * half)
+        br = (cx - perp[0] * half, cy - perp[1] * half)
+        pygame.draw.polygon(surface, ink, [(cx, cy), tip, bl])
+        pygame.draw.polygon(surface, light, [(cx, cy), tip, br])
+
+    for ang in (45, 135, 225, 315):  # puntas menores (diagonales), detrás
+        spike(ang, radius * 0.55, radius * 0.10)
+    for ang in (0, 90, 180, 270):    # puntas mayores (N/E/S/O), encima
+        spike(ang, radius, radius * 0.13)
+    pygame.draw.circle(surface, ink, (int(cx), int(cy)), int(radius * 1.04), max(1, size // 60))
+    pygame.draw.circle(surface, ink, (int(cx), int(cy)), int(radius * 0.11))
+    font = pygame.font.SysFont(None, int(size * 0.15))
+    label = font.render("N", True, ink)
+    surface.blit(label, label.get_rect(center=(cx, cy - radius - size * 0.05)))
+    _save(surface, name, out_dir)
+
+
 def main() -> None:
     pygame.init()
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
@@ -197,6 +291,12 @@ def main() -> None:
         _make_water_corner(name, 64, ASSETS_DIR)
     _make_bridge("bridge_h", True, 64, ASSETS_DIR)
     _make_bridge("bridge_v", False, 64, ASSETS_DIR)
+    # Piezas del estilo "pergamino vintage": textura de papel + máscaras de
+    # borde (autotiling de terreno seco).
+    _make_paper("paper", 256, ASSETS_DIR)
+    _make_edge_mask("edge_mask", 64, ASSETS_DIR)
+    _make_corner_mask("corner_mask", 64, ASSETS_DIR)
+    _make_compass("compass", 256, ASSETS_DIR)
     for name, color in FLAGS.items():
         _make_flag(name, 32, color, ASSETS_DIR)
     print(f"Placeholders generados en {ASSETS_DIR}")
