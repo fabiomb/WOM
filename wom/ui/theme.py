@@ -37,7 +37,7 @@ VIGNETTE_STRENGTH = 0.55
 # en 0 a propósito — un brillo distinto por tile dibuja la grilla en las zonas
 # uniformes; subilo solo si sumás variantes de arte que disimulen los bordes.
 TILE_STYLE_VARIANTS = 2
-TILE_BRIGHTNESS_JITTER = 0.0
+TILE_BRIGHTNESS_JITTER = 0
 
 # Chrome cartográfico: rosa de los vientos (fracción del lado menor del mapa) y
 # marco decorativo de tinta alrededor del mapa. Reemplazables por arte propio
