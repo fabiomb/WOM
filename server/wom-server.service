@@ -1,0 +1,22 @@
+[Unit]
+Description=Servidor online de WOM
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=womserver
+Group=womserver
+WorkingDirectory=/opt/wom-server
+ExecStart=/usr/bin/python3 -m server --config server.toml
+Restart=on-failure
+RestartSec=3
+# Endurecimiento básico (ver docs/server_deploy.md §5)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/wom-server
+
+[Install]
+WantedBy=multi-user.target

@@ -25,13 +25,17 @@ Sin `--config` se usan los valores por defecto (ver `server.toml`).
 
 El paquete mínimo para instalar el servidor en un host (solo las capas puras de
 `wom/` + `data/config` + `data/scenarios` + este `server/`) se arma con
-`tools/pack_server.py`. El manual de instalación, servicio systemd y apertura de
-puerto en firewalls de Linux se documenta en `docs/server.md` §11 (y se ampliará
-en `docs/server_deploy.md` en la fase S9).
+`tools/pack_server.py`. El **manual completo** (instalación, servicio systemd,
+apertura de puerto y rate-limiting con UFW/nftables/iptables/firewalld, fail2ban,
+túnel cifrado y verificación) está en
+[`../docs/server_deploy.md`](../docs/server_deploy.md). La unidad systemd de
+ejemplo es [`wom-server.service`](wom-server.service).
 
 ## Estado
 
-Fases S0 (esqueleto) y S1 (protocolo de lobby) implementadas. El loop de
-atención, el lobby (`wom/net/lobby.py`), las partidas server-side
-(`wom/net/match.py`), el anti-DDOS y la UI cliente llegan en fases posteriores
-(ver `docs/server.md` §12).
+Servidor online **v0.7.0 completo**: lobby con chat + varias partidas
+simultáneas (`wom/net/lobby.py`), partidas autoritativas player-less
+(`wom/net/match.py`), anti-DDOS, orquestador (`server/game_server.py`), cliente
+(`wom/net/server_session.py`) y navegador de servidores en la UI
+(`wom/ui/server_browser_screen.py`). Diseño en `docs/server.md`, deploy en
+`docs/server_deploy.md`.
