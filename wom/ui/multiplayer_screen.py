@@ -84,6 +84,7 @@ class MultiplayerScreen:
     def __init__(self, default_name: str = "Jugador"):
         self.mode = "hub"
         self.wants_menu = False
+        self.wants_internet = False  # el hub pide abrir el navegador de servidores
         self.net_start: NetGameStart | None = None
 
         self.title_font = pygame.font.SysFont(None, 64)
@@ -264,6 +265,8 @@ class MultiplayerScreen:
             self.mode = "create"
         elif hit == "to_connect":
             self.mode = "connect"
+        elif hit == "to_internet":
+            self.wants_internet = True
         elif hit == "n_players":
             self.n_players = self.n_players % MAX_PLAYERS + 1
             if self.n_players < 2:
@@ -357,9 +360,15 @@ class MultiplayerScreen:
         surface.blit(label, label.get_rect(center=(window.centerx, window.bottom - 40)))
 
     def _draw_hub(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 20
+        y = area.y + 10
+        cap = self.small_font.render("Red local (LAN / IP directa)", True, theme.TEXT_DIM)
+        surface.blit(cap, (area.x + 40, y))
+        y += 26
         y = self._button(surface, "to_create", "Crear partida", area, y)
         y = self._button(surface, "to_connect", "Conectarse", area, y)
+        cap2 = self.small_font.render("Internet (servidor dedicado)", True, theme.TEXT_DIM)
+        surface.blit(cap2, (area.x + 40, y + 6))
+        y = self._button(surface, "to_internet", "Jugar por Internet", area, y + 32)
         self._button(surface, "back", "Volver (ESC)", area, y + 10)
 
     def _draw_create(self, surface: pygame.Surface, area: pygame.Rect) -> None:

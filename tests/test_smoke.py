@@ -48,6 +48,7 @@ def test_core_does_not_import_pygame():
         "wom.net.protocol, wom.net.orders_codec, wom.net.state_hash, "
         "wom.net.transport, wom.net.session, wom.net.config_fingerprint, "
         "wom.net.lockstep, wom.net.rules, wom.net.lobby, wom.net.match, "
+        "wom.net.server_session, "
         "wom.llm.agent, wom.llm.actions, wom.llm.observation, "
         "wom.llm.prompt, wom.llm.backend; "
         "sys.exit(1 if 'pygame' in sys.modules else 0)"

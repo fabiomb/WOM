@@ -29,6 +29,7 @@ from wom.ui.menu_screen import (
     ScenarioChoice,
 )
 from wom.ui.multiplayer_screen import MultiplayerScreen
+from wom.ui.server_browser_screen import ServerBrowserScreen
 from wom.ui.music import MusicPlayer
 from wom.ui.scenario_intro_overlay import ScenarioIntroOverlay
 from wom.ui.music_overlay import MusicOverlay
@@ -188,6 +189,14 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
                 current = GameScreen(load_game(action.path), human_id=HUMAN_ID)
         elif isinstance(current, MultiplayerScreen):
             current.update()  # conduce la red (lobby) una vez por frame
+            if current.net_start is not None:
+                current = _start_net_game(current.net_start)
+            elif current.wants_internet:
+                current = ServerBrowserScreen()
+            elif current.wants_menu:
+                current = MenuScreen(ai_level, seed, music=music)
+        elif isinstance(current, ServerBrowserScreen):
+            current.update()  # conduce la sesión con el servidor dedicado
             if current.net_start is not None:
                 current = _start_net_game(current.net_start)
             elif current.wants_menu:

@@ -9,7 +9,7 @@ defaults.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from wom.paths import user_root
@@ -26,6 +26,29 @@ class Settings:
     music_shuffle: bool = True  # False = secuencial
     video_resolution: str = "1920x1080"  # tamaño físico de la ventana
     video_maximized: bool = False  # arrancar maximizado
+    # Multijugador por Internet: nombre del jugador y servidores guardados
+    # (cada uno: {"name", "host", "port"}). Los administra el navegador de
+    # servidores (S6) y se persisten como el resto de las preferencias.
+    player_name: str = "Jugador"
+    servers: list = field(default_factory=list)
+
+
+def add_server(servers: list, name: str, host: str, port: int) -> list:
+    """Devuelve una lista nueva con el servidor agregado al final."""
+    return [*servers, {"name": name, "host": host, "port": int(port)}]
+
+
+def update_server(servers: list, index: int, name: str, host: str, port: int) -> list:
+    """Devuelve una lista nueva con el servidor `index` reemplazado."""
+    out = [dict(s) for s in servers]
+    if 0 <= index < len(out):
+        out[index] = {"name": name, "host": host, "port": int(port)}
+    return out
+
+
+def remove_server(servers: list, index: int) -> list:
+    """Devuelve una lista nueva sin el servidor `index`."""
+    return [dict(s) for i, s in enumerate(servers) if i != index]
 
 
 def load_settings(path: Path | None = None) -> Settings:
