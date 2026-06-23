@@ -206,7 +206,10 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
                 current = MenuScreen(ai_level, seed, music=music)
         else:  # GameScreen
             current.update()  # conduce el lockstep en red (no-op sin red)
-            if current.wants_menu:
+            if getattr(current, "wants_lobby", False) and current.net is not None:
+                # Partida del servidor dedicado: vuelve al lobby con la sesión viva.
+                current = ServerBrowserScreen(session=current.net.session)
+            elif current.wants_menu:
                 current = MenuScreen(ai_level, seed, music=music)
 
         current.draw(canvas)

@@ -128,6 +128,7 @@ class GameScreen:
         self.pending_creations: set[Coord] = set()
         self.result: VictoryResult | None = None
         self.wants_menu = False  # lo activa ESC; lo consume el loop de app
+        self.wants_lobby = False  # red por servidor: volver al lobby, no al menú
         self.notice: str | None = None  # aviso temporal del HUD ("guardada...")
         self.notice_until = 0
         self.animation: TurnAnimation | None = None
@@ -459,9 +460,19 @@ class GameScreen:
         return None
 
     def _leave_to_menu(self) -> None:
-        """Pide volver al menú. En red avisa al rival (Bye) y cierra la sesión,
-        para que no quede esperando órdenes de un jugador que ya salió."""
+        """Pide salir de la partida.
+
+        - En **servidor dedicado** (con la sesión viva): no cierra la conexión —
+          deja la partida (`leave_match`) y vuelve al **lobby** (`wants_lobby`).
+        - En LAN o un jugador: avisa al rival (Bye), cierra la sesión y vuelve
+          al **menú**, para que el rival no quede esperando órdenes."""
+        from wom.net.server_session import ServerSession
+
         if self.net is not None:
+            if isinstance(self.net.session, ServerSession) and not self.net.disconnected:
+                self.net.session.leave_match()
+                self.wants_lobby = True
+                return
             self.net.session.cancel("el rival salió de la partida")
         self.wants_menu = True
 

@@ -9,13 +9,47 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 import pygame
 import pytest
 
+from wom.core.game import Game, Player
+from wom.core.mapgen import MapParams
+from wom.core.victory import VictoryMode
 from wom.net.lobby import LobbyServer
-from wom.net.transport import Server
+from wom.net.server_session import ServerSession
+from wom.net.transport import Server, connect
 from wom.persistence.settings import add_server, load_settings, remove_server, update_server
 from wom.ui import theme
+from wom.ui.game_screen import GameScreen
 from wom.ui.menu_screen import MenuScreen
 from wom.ui.multiplayer_screen import MultiplayerScreen
 from wom.ui.server_browser_screen import ServerBrowserScreen
+
+
+class _FakeConn:
+    """Conexión falsa para construir una ServerSession sin sockets."""
+
+    alive = True
+    error = None
+
+    def send(self, _m):
+        pass
+
+    def poll(self):
+        return []
+
+    def close(self):
+        self.alive = False
+
+
+class _FakeNet:
+    def __init__(self, session, disconnected=False):
+        self.session = session
+        self.disconnected = disconnected
+
+
+def _small_game():
+    return Game.new(
+        MapParams(20, 14, 3, 2, seed=1, n_players=2),
+        [Player(0, "a"), Player(1, "b")], VictoryMode.TOTAL,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -129,6 +163,94 @@ def test_conecta_a_un_lobbyserver_real(screen, tmp_path):
         sb._disconnect()
         lobby.shutdown()
         server.close()
+
+
+def test_retomar_lobby_desde_sesion_viva(screen):
+    sess = ServerSession(_FakeConn(), "Ana")
+    sess.server_name = "Srv"
+    sb = ServerBrowserScreen(session=sess)
+    assert sb.mode == "lobby" and sb.session is sess
+    sb.draw(screen)  # dibuja el lobby retomado sin romper
+
+
+def test_salir_de_partida_de_servidor_vuelve_al_lobby(screen):
+    gs = GameScreen(_small_game(), human_id=0)
+    gs.net = _FakeNet(ServerSession(_FakeConn(), "Ana"))
+    gs._leave_to_menu()
+    assert gs.wants_lobby is True and gs.wants_menu is False
+
+
+def test_salir_de_partida_lan_vuelve_al_menu(screen):
+    class _LanSession:
+        def cancel(self, _r=""):
+            self.cancelled = True
+
+    gs = GameScreen(_small_game(), human_id=0)
+    lan = _LanSession()
+    gs.net = _FakeNet(lan)
+    gs._leave_to_menu()
+    assert gs.wants_menu is True and gs.wants_lobby is False
+    assert getattr(lan, "cancelled", False) is True
+
+
+def test_reconexion_desde_el_navegador(screen, tmp_path):
+    """Un jugador se cae de una partida en curso; otro la ve en el catálogo,
+    se une y reconecta al asiento reservado con el estado vivo."""
+    from server.config import ServerConfig
+    from server.game_server import GameServer
+
+    gs = GameServer(ServerConfig(host="127.0.0.1", port=0))
+    a = ServerSession(connect("127.0.0.1", gs.port, timeout=3.0), "Ana")
+    b = ServerSession(connect("127.0.0.1", gs.port, timeout=3.0), "Beto")
+    c = None
+
+    def pump(pred, sessions=(), screens=(), timeout=6.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            gs.tick()
+            for s in sessions:
+                s.update()
+            for sc in screens:
+                sc.update()
+            if pred():
+                return True
+            time.sleep(0.005)
+        return False
+
+    try:
+        assert pump(lambda: a.lobby_id is not None and b.lobby_id is not None, sessions=[a, b])
+        a.create_match(name="Partida", max_players=2, map_source="random")
+        assert pump(lambda: a.match_id is not None, sessions=[a, b])
+        mid = a.match_id
+        assert pump(lambda: any(r[0] == mid for r in b.matches), sessions=[a, b])
+        b.join_match(mid)
+        assert pump(lambda: b.match_id is not None, sessions=[a, b])
+        a.set_ready(True)
+        b.set_ready(True)
+        # La partida arranca (el servidor la marca en curso).
+        assert pump(lambda: mid in gs._playing, sessions=[a, b]), "no arrancó"
+
+        # Beto se cae; el servidor reserva su asiento (lo cubre la IA).
+        b.cancel()
+        assert pump(lambda: 1 in gs.runners[mid]._absent, sessions=[a]), "no quedó ausente"
+
+        # Caro abre el navegador, ve la partida en curso y se une (reconecta).
+        c = ServerBrowserScreen(settings_path=tmp_path / "s.json")
+        c.f_player.value = "Caro"
+        c.servers = add_server(c.servers, "Local", "127.0.0.1", gs.port)
+        c.selected = 0
+        c._activate("connect")
+        assert pump(lambda: c.mode == "lobby", sessions=[a], screens=[c])
+        assert pump(lambda: any(r[0] == mid for r in c.session.matches), sessions=[a], screens=[c])
+        c.selected_match = mid
+        c._activate("join")
+        assert pump(lambda: c.net_start is not None, sessions=[a], screens=[c]), "no reconectó"
+        assert c.net_start.human_id == 1  # tomó el asiento reservado de Beto
+    finally:
+        a.cancel()
+        if c is not None:
+            c._disconnect()
+        gs.transport.close()
 
 
 def test_flujo_crear_listo_arranca_contra_servidor(screen, tmp_path):

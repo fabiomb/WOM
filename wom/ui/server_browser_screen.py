@@ -48,8 +48,9 @@ CHAT_LOG_MAX = 8
 class ServerBrowserScreen:
     """Lista de servidores + conexión + lobby (multijugador por Internet)."""
 
-    def __init__(self, settings_path=None):
-        self.mode = "browser"
+    def __init__(self, settings_path=None, session: ServerSession | None = None):
+        # `session` viva ⇒ se retoma el lobby tras una partida (no se reconecta).
+        self.mode = "lobby" if session is not None else "browser"
         self.wants_menu = False
         self._settings_path = settings_path
 
@@ -88,8 +89,10 @@ class ServerBrowserScreen:
         self._setup = None  # GameSetup recibido
         self.net_start: NetGameStart | None = None
 
-        self.session: ServerSession | None = None
-        self.status = ""
+        self.session: ServerSession | None = session
+        self.status = (
+            f"De vuelta en el lobby de {session.server_name}." if session is not None else ""
+        )
 
     @property
     def capturing_text(self) -> bool:
