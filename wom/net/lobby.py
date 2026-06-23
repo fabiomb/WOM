@@ -172,12 +172,46 @@ Event = (
 # --- estructuras internas --------------------------------------------------
 
 
+class _TokenBucket:
+    """Token bucket para limitar la tasa de mensajes de una conexión.
+
+    Arranca lleno (`capacity` tokens), se rellena a `rate` tokens/seg y cada
+    mensaje consume uno. `allow` devuelve False cuando no quedan tokens (la
+    conexión está inundando)."""
+
+    def __init__(self, rate: float, capacity: float, now: float) -> None:
+        self._rate = rate
+        self._capacity = float(capacity)
+        self._tokens = float(capacity)
+        self._ts = now
+
+    def allow(self, now: float) -> bool:
+        self._tokens = min(self._capacity, self._tokens + (now - self._ts) * self._rate)
+        self._ts = now
+        if self._tokens >= 1.0:
+            self._tokens -= 1.0
+            return True
+        return False
+
+
+@dataclass
+class _Pending:
+    """Conexión entrante que todavía no completó el handshake (sin Join)."""
+
+    conn: Connection
+    deadline: float
+    bucket: _TokenBucket
+    ip: str
+
+
 @dataclass
 class _LobbyClient:
     conn: Connection
     lobby_id: int
     name: str
     match_id: int | None = None  # partida en la que está, o None (libre)
+    bucket: _TokenBucket | None = None
+    ip: str = ""
 
 
 @dataclass
@@ -236,6 +270,9 @@ class LobbyServer:
         password: str = "",
         handshake_timeout: float = 10.0,
         max_connections: int = 200,
+        max_connections_per_ip: int = 8,
+        msg_rate: float = 30.0,
+        msg_burst: int = 60,
         max_matches: int = 20,
         allow_random: bool = True,
         server=None,
@@ -247,26 +284,58 @@ class LobbyServer:
         self._password = password
         self._handshake_timeout = handshake_timeout
         self._max_connections = max_connections
+        self._max_connections_per_ip = max_connections_per_ip
+        self._msg_rate = msg_rate
+        self._msg_burst = msg_burst
         self._max_matches = max_matches
         self._allow_random = allow_random
         self._server = server
         self._now = time_fn
 
         self._seen: set = set()
-        self._pending: dict[Connection, float] = {}  # conexión → deadline
+        self._pending: dict[Connection, _Pending] = {}  # conexión → pendiente
         self._clients: dict[int, _LobbyClient] = {}   # lobby_id → cliente
         self._matches: dict[int, _Match] = {}
+        self._ip_counts: dict[str, int] = {}  # IP → conexiones vivas (pend+clientes)
         self._next_lobby_id = 0
         self._next_match_id = 1
 
     # --- alta de conexiones / consultas ----------------------------------
 
     def add_connection(self, conn: Connection) -> None:
-        """Registra una conexión entrante (aún sin Join). Idempotente."""
+        """Registra una conexión entrante (aún sin Join). Idempotente.
+
+        Anti-DDOS: rechaza (cierra) si se superó el tope total de conexiones o
+        el tope por IP, antes de asignarle ningún estado de lobby."""
         if conn in self._seen:
             return
         self._seen.add(conn)
-        self._pending[conn] = self._now() + self._handshake_timeout
+        ip = conn.peer_ip
+        if len(self._pending) + len(self._clients) >= self._max_connections:
+            conn.send(Error(code=ErrorCode.SERVER_FULL, message="el servidor está lleno"))
+            conn.close()
+            return
+        if ip and self._ip_counts.get(ip, 0) >= self._max_connections_per_ip:
+            conn.send(Error(code=ErrorCode.RATE_LIMITED, message="demasiadas conexiones desde tu IP"))
+            conn.close()
+            return
+        now = self._now()
+        self._pending[conn] = _Pending(
+            conn, now + self._handshake_timeout, _TokenBucket(self._msg_rate, self._msg_burst, now), ip
+        )
+        if ip:
+            self._ip_counts[ip] = self._ip_counts.get(ip, 0) + 1
+
+    def _release_ip(self, ip: str) -> None:
+        if ip and ip in self._ip_counts:
+            self._ip_counts[ip] -= 1
+            if self._ip_counts[ip] <= 0:
+                del self._ip_counts[ip]
+
+    def _drop_pending(self, conn: Connection) -> None:
+        pend = self._pending.pop(conn, None)
+        if pend is not None:
+            self._release_ip(pend.ip)
 
     @property
     def player_count(self) -> int:
@@ -344,6 +413,7 @@ class LobbyServer:
             conn.close()
         self._clients.clear()
         self._pending.clear()
+        self._ip_counts.clear()
 
     # --- bucle de actualización ------------------------------------------
 
@@ -353,16 +423,26 @@ class LobbyServer:
             for conn in self._server.poll_connections():
                 self.add_connection(conn)
         self._poll_pending(events)
+        now = self._now()
         for lobby_id in list(self._clients):
             cli = self._clients.get(lobby_id)
             if cli is None:
                 continue
+            flooded = False
             for message in cli.conn.poll():
+                if cli.bucket is not None and not cli.bucket.allow(now):
+                    flooded = True
+                    break
                 self._handle(cli, message, events)
                 if lobby_id not in self._clients:
                     break
             cli = self._clients.get(lobby_id)
-            if cli is not None and not cli.conn.alive:
+            if cli is None:
+                continue
+            if flooded:
+                cli.conn.send(Error(code=ErrorCode.RATE_LIMITED, message="demasiados mensajes"))
+                self._drop_client(lobby_id, events)
+            elif not cli.conn.alive:
                 self._drop_client(lobby_id, events)
         return events
 
@@ -371,33 +451,47 @@ class LobbyServer:
     def _poll_pending(self, events: list[Event]) -> None:
         now = self._now()
         for conn in list(self._pending):
-            if not conn.alive:
-                self._pending.pop(conn, None)
+            pend = self._pending.get(conn)
+            if pend is None:
                 continue
-            handled = False
+            if not conn.alive:
+                self._drop_pending(conn)
+                continue
+            handled = flooded = False
             for message in conn.poll():
+                if not pend.bucket.allow(now):
+                    flooded = True
+                    break
                 if isinstance(message, Join):
                     self._accept(conn, message, events)
                     handled = True
                     break
             if handled:
                 continue
-            if now >= self._pending.get(conn, now):
+            if flooded:
+                conn.send(Error(code=ErrorCode.RATE_LIMITED, message="demasiados mensajes"))
+                conn.close()
+                self._drop_pending(conn)
+            elif now >= pend.deadline:
                 # No se presentó a tiempo: cierra (anti conexiones zombi).
                 conn.close()
-                self._pending.pop(conn, None)
+                self._drop_pending(conn)
 
     def _accept(self, conn: Connection, join: Join, events: list[Event]) -> None:
-        self._pending.pop(conn, None)
+        pend = self._pending.pop(conn, None)
         reason = self._reject_reason(join)
         if reason is not None:
             conn.send(Welcome(accepted=False, reason=reason, name=self.name))
             conn.close()
+            if pend is not None:
+                self._release_ip(pend.ip)
             return
         lobby_id = self._next_lobby_id
         self._next_lobby_id += 1
         name = join.name.strip()
-        self._clients[lobby_id] = _LobbyClient(conn, lobby_id, name)
+        bucket = pend.bucket if pend is not None else _TokenBucket(self._msg_rate, self._msg_burst, self._now())
+        ip = pend.ip if pend is not None else conn.peer_ip
+        self._clients[lobby_id] = _LobbyClient(conn, lobby_id, name, bucket=bucket, ip=ip)
         conn.send(Welcome(accepted=True, reason="", name=self.name, lobby_id=lobby_id))
         events.append(PlayerEntered(lobby_id, name))
         self._broadcast_lobby_state()
@@ -414,8 +508,6 @@ class LobbyServer:
             return "la configuración de balance no coincide con la del servidor"
         if self._require_password and join.password != self._password:
             return "contraseña incorrecta"
-        if len(self._clients) >= self._max_connections:
-            return "el servidor está lleno"
         name = join.name.strip()
         if not name or len(name) > MAX_NAME_LEN:
             return "nombre inválido"
@@ -533,6 +625,7 @@ class LobbyServer:
         self._release_seat(cli, events)
         cli.conn.close()
         self._clients.pop(lobby_id, None)
+        self._release_ip(cli.ip)
         events.append(PlayerExited(lobby_id, cli.name))
         self._broadcast_lobby_state()
 

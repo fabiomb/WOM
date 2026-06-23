@@ -28,6 +28,10 @@ class Connection:
     def __init__(self, sock: socket.socket) -> None:
         self._sock = sock
         self._sock.settimeout(None)  # bloqueante: el hilo lector espera datos
+        try:
+            self._peer = sock.getpeername()
+        except OSError:
+            self._peer = ("", 0)
         self._decoder = FrameDecoder()
         self._inbox: "queue.Queue[Message]" = queue.Queue()
         self._send_lock = threading.Lock()
@@ -41,6 +45,11 @@ class Connection:
     def alive(self) -> bool:
         """False cuando el par cerró la conexión o hubo un error de red."""
         return self._alive.is_set()
+
+    @property
+    def peer_ip(self) -> str:
+        """IP del par (para límites por IP). Vacío si no se pudo determinar."""
+        return self._peer[0] if self._peer else ""
 
     @property
     def error(self) -> str | None:
