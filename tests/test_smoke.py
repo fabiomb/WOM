@@ -75,7 +75,7 @@ def test_server_does_not_import_pygame():
 
     code = (
         "import sys; "
-        "import server.main, server.config; "
+        "import server.main, server.config, server.game_server; "
         "sys.exit(1 if 'pygame' in sys.modules else 0)"
     )
     result = subprocess.run(

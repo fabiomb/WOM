@@ -13,6 +13,7 @@ se implementa en una fase posterior (ver `docs/server.md` §12, fase S4).
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 from server.config import ServerConfig, load_config
@@ -64,13 +65,30 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         return run_check(cfg)
 
+    _configure_logging(cfg)
     print(summary(cfg))
-    print(
-        "El loop de atención del servidor (lobby + partidas) se implementa en "
-        "una fase posterior (ver docs/server.md §12). Usá --check para validar "
-        "el entorno."
-    )
+    # Import perezoso: así `--check` (y los tests de config) no cargan el core.
+    from server.game_server import GameServer
+
+    server = GameServer(cfg)
+    print(f"Escuchando en {cfg.host}:{server.port}. Ctrl+C para detener.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.stop()
     return 0
+
+
+def _configure_logging(cfg: ServerConfig) -> None:
+    level = getattr(logging, cfg.log_level.upper(), logging.INFO)
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if cfg.log_file:
+        handlers.append(logging.FileHandler(cfg.log_file, encoding="utf-8"))
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=handlers,
+    )
 
 
 if __name__ == "__main__":

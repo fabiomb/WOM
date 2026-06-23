@@ -68,10 +68,9 @@ def test_main_check_returns_zero(capsys):
     assert "OK" in out
 
 
-def test_main_without_loop_reports_and_exits(capsys):
-    assert main([]) == 0
-    out = capsys.readouterr().out
-    assert "fase posterior" in out
+# Nota: `main([])` sin --check arranca el servidor (serve_forever, bloqueante),
+# así que no se invoca en un test unitario. El loop se cubre en
+# tests/test_server_loop.py (GameServer.tick sobre loopback).
 
 
 def test_main_bad_config_returns_two(tmp_path, capsys):
