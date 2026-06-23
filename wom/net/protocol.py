@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import struct
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 PROTOCOL_VERSION = 1
 
@@ -41,11 +41,15 @@ class Hello:
 
 @dataclass(frozen=True)
 class Welcome:
-    """host→cliente: acepta o rechaza la conexión."""
+    """host/servidor→cliente: acepta o rechaza la conexión.
+
+    En el servidor dedicado, `lobby_id` es el id que el cliente tendrá en el
+    lobby (en LAN no aplica y queda en -1)."""
 
     accepted: bool
     reason: str
     name: str
+    lobby_id: int = -1
 
 
 @dataclass(frozen=True)
@@ -148,6 +152,105 @@ class Bye:
     reason: str
 
 
+# --- mensajes de lobby (servidor dedicado online) -------------------------
+# El servidor dedicado suma una capa de LOBBY por encima de las partidas: los
+# jugadores se conectan al servidor (no a un host-jugador), ven el roster y el
+# catálogo de partidas, chatean en un canal global y crean o se unen a una
+# partida. Una vez DENTRO de una partida se reusan los mensajes de partida de
+# arriba (Ready/Start/GameSetup/Orders/TurnOrders/Hash/StateSync/Chat...).
+
+
+@dataclass(frozen=True)
+class Join:
+    """cliente→servidor: se presenta al conectar al servidor dedicado.
+
+    Como `Hello`, más la `password` del servidor (vacía si no la exige)."""
+
+    wom_version: str
+    protocol_version: int
+    config_hash: str
+    name: str
+    password: str = ""
+
+
+@dataclass(frozen=True)
+class LobbyState:
+    """servidor→clientes: foto del lobby. Listas JSON-planas:
+
+    - `players`: ``[[lobby_id, nick, en_partida(bool), match_id(-1 si ninguna)], ...]``
+    - `matches`: ``[[match_id, nombre, max_players, ocupados, estado, mapa], ...]``
+    """
+
+    players: list
+    matches: list
+
+
+@dataclass(frozen=True)
+class CreateMatch:
+    """cliente→servidor: crea una partida nueva y la publica en el lobby."""
+
+    name: str
+    max_players: int
+    map_source: str  # "scenario" | "random"
+    map_ref: str = ""  # nombre del .wom si map_source == "scenario"
+    rules: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class JoinMatch:
+    """cliente→servidor: pide unirse a una partida disponible."""
+
+    match_id: int
+
+
+@dataclass(frozen=True)
+class LeaveMatch:
+    """cliente→servidor: abandona la sala/partida y vuelve al lobby."""
+
+
+@dataclass(frozen=True)
+class MatchJoined:
+    """servidor→cliente: confirma el ingreso a una partida. `seat` es el id de
+    jugador que tendrá en esa partida; `roster` es la sala (formato `Lobby`)."""
+
+    match_id: int
+    seat: int
+    roster: list
+
+
+@dataclass(frozen=True)
+class LobbyChat:
+    """ambos: mensaje del chat GLOBAL del lobby (no el chat de una partida)."""
+
+    name: str
+    text: str
+    ts: float
+
+
+@dataclass(frozen=True)
+class Error:
+    """servidor→cliente: una acción fue rechazada. `code` es estable (ver
+    `ErrorCode`); `message` es texto listo para el HUD, en español."""
+
+    code: str
+    message: str
+
+
+class ErrorCode:
+    """Códigos estables de `Error`: el cliente reacciona según el `code` y
+    muestra el `message`. No es un Enum a propósito (viajan como str en JSON)."""
+
+    WRONG_PASSWORD = "WRONG_PASSWORD"
+    MATCH_FULL = "MATCH_FULL"
+    MATCH_GONE = "MATCH_GONE"
+    VERSION_MISMATCH = "VERSION_MISMATCH"
+    CONFIG_MISMATCH = "CONFIG_MISMATCH"
+    NAME_TAKEN = "NAME_TAKEN"
+    RATE_LIMITED = "RATE_LIMITED"
+    SERVER_FULL = "SERVER_FULL"
+    INVALID = "INVALID"
+
+
 Message = (
     Hello
     | Welcome
@@ -163,6 +266,14 @@ Message = (
     | Ping
     | Pong
     | Bye
+    | Join
+    | LobbyState
+    | CreateMatch
+    | JoinMatch
+    | LeaveMatch
+    | MatchJoined
+    | LobbyChat
+    | Error
 )
 
 # Registro nombre↔clase para (de)serializar por el campo "type".
@@ -183,6 +294,14 @@ _MESSAGE_TYPES: dict[str, type] = {
         Ping,
         Pong,
         Bye,
+        Join,
+        LobbyState,
+        CreateMatch,
+        JoinMatch,
+        LeaveMatch,
+        MatchJoined,
+        LobbyChat,
+        Error,
     )
 }
 

@@ -6,10 +6,18 @@ from wom.net import protocol
 from wom.net.protocol import (
     Bye,
     Chat,
+    CreateMatch,
+    Error,
     FrameDecoder,
     GameSetup,
     Hash,
     Hello,
+    Join,
+    JoinMatch,
+    LeaveMatch,
+    LobbyChat,
+    LobbyState,
+    MatchJoined,
     Orders,
     Ping,
     Pong,
@@ -27,6 +35,7 @@ from wom.net.protocol import (
 MESSAGES = [
     Hello(wom_version="0.4.0", protocol_version=1, config_hash="abc", name="Ana"),
     Welcome(accepted=True, reason="", name="Beto"),
+    Welcome(accepted=True, reason="", name="Beto", lobby_id=3),
     GameSetup(state={"turn": 0, "seed": 42}, rules={"turn_seconds": 60}, names=["Ana", "Beto"]),
     Ready(ready=True),
     Start(),
@@ -37,6 +46,23 @@ MESSAGES = [
     Ping(t=1.0),
     Pong(t=1.0),
     Bye(reason="host canceló"),
+    # --- lobby (servidor dedicado) ---
+    Join(wom_version="0.7.0", protocol_version=1, config_hash="abc", name="Ana", password="secreta"),
+    Join(wom_version="0.7.0", protocol_version=1, config_hash="abc", name="Ana"),
+    LobbyState(
+        players=[[0, "Ana", False, -1], [1, "Beto", True, 5]],
+        matches=[[5, "Sala de Beto", 4, 2, "abierta", "aleatorio"]],
+    ),
+    CreateMatch(name="Mi partida", max_players=3, map_source="random"),
+    CreateMatch(
+        name="Escenario X", max_players=2, map_source="scenario",
+        map_ref="rio.wom", rules={"turn_seconds": 60, "max_turns": 80},
+    ),
+    JoinMatch(match_id=5),
+    LeaveMatch(),
+    MatchJoined(match_id=5, seat=1, roster=[[0, "Beto", True], [1, "Ana", False]]),
+    LobbyChat(name="Ana", text="hola a todos", ts=99.0),
+    Error(code="MATCH_FULL", message="la partida está llena"),
 ]
 
 

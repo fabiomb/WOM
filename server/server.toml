@@ -1,0 +1,30 @@
+# Configuración del servidor dedicado de WOM (ejemplo).
+# Copiá este archivo y ajustá los valores; corré con:
+#   python -m server --config server.toml
+# Validá una instalación sin abrir el puerto con:
+#   python -m server --config server.toml --check
+
+[server]
+host = "0.0.0.0"        # interfaz de escucha (0.0.0.0 = todas)
+port = 50000            # puerto TCP (abrilo en el firewall, ver docs/server.md)
+name = "Mi servidor WOM"
+
+[auth]
+require_password = false  # true para exigir contraseña al entrar al lobby
+password = ""             # se ignora si require_password = false
+
+[limits]
+max_connections = 200        # conexiones totales simultáneas
+max_connections_per_ip = 8   # tope por IP (mitiga floods de un origen)
+max_matches = 20             # partidas simultáneas
+handshake_timeout = 10       # seg. para presentarse (Join) antes de cerrar
+msg_rate = 30                # mensajes/seg por conexión (token bucket)
+msg_burst = 60               # ráfaga permitida
+
+[maps]
+scenarios_dir = "data/scenarios"  # carpeta de .wom predefinidos
+allow_random = true               # permitir partidas con mapa aleatorio
+
+[logging]
+level = "info"            # debug | info | warning | error
+file = "wom-server.log"   # vacío = solo a consola

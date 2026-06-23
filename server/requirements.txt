@@ -1,0 +1,6 @@
+# El servidor dedicado de WOM es stdlib-only: NO requiere paquetes de terceros.
+#
+# Reusa solo las capas puras de wom/ (core, net, persistence, ai), que no
+# dependen de pygame. La configuración usa tomllib, incluido en la stdlib.
+#
+# Requisito: Python >= 3.11 (por tomllib). El proyecto usa 3.13.

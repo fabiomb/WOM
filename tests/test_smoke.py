@@ -47,7 +47,7 @@ def test_core_does_not_import_pygame():
         "wom.persistence.savegame, wom.persistence.scenario, "
         "wom.net.protocol, wom.net.orders_codec, wom.net.state_hash, "
         "wom.net.transport, wom.net.session, wom.net.config_fingerprint, "
-        "wom.net.lockstep, wom.net.rules, "
+        "wom.net.lockstep, wom.net.rules, wom.net.lobby, wom.net.match, "
         "wom.llm.agent, wom.llm.actions, wom.llm.observation, "
         "wom.llm.prompt, wom.llm.backend; "
         "sys.exit(1 if 'pygame' in sys.modules else 0)"
@@ -60,4 +60,30 @@ def test_core_does_not_import_pygame():
     )
     assert result.returncode == 0, (
         f"wom.core/wom.ai/wom.net/wom.llm no deben importar pygame\n{result.stderr}"
+    )
+
+
+def test_server_does_not_import_pygame():
+    """El servidor dedicado es stdlib-only: no debe arrastrar pygame.
+
+    Se verifica en un subproceso limpio (otros tests sí importan pygame para la
+    UI). Importa el runnable del servidor y comprueba que pygame no quedó cargado.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    code = (
+        "import sys; "
+        "import server.main, server.config; "
+        "sys.exit(1 if 'pygame' in sys.modules else 0)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"el paquete server/ no debe importar pygame\n{result.stderr}"
     )
