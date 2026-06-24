@@ -7,9 +7,21 @@ lanza un error claro, y si falta una sección/clave se usa el default.
 
 from __future__ import annotations
 
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+# tomllib está en la stdlib desde Python 3.11. En 3.10 (p. ej. Ubuntu 22.04 LTS)
+# se usa el paquete `tomli` como reemplazo (misma API): `pip install tomli`.
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError as exc:  # pragma: no cover
+        raise ModuleNotFoundError(
+            "Falta el lector de TOML: usá Python 3.11+ o instalá 'tomli' "
+            "(pip install tomli  /  apt install python3-tomli)."
+        ) from exc
 
 DEFAULT_PORT = 50000
 

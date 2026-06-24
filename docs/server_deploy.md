@@ -15,8 +15,10 @@ terceros): el despliegue es copiar una carpeta y correr `python -m server`.
 
 ## 1. Requisitos
 
-- Un host Linux (VPS o máquina propia) con **Python 3.11 o superior** (el
-  proyecto usa 3.13).
+- Un host Linux (VPS o máquina propia) con **Python 3.10 o superior**.
+  - Con **3.11+** no hace falta nada más (el lector de TOML viene en la stdlib).
+  - Con **3.10** (p. ej. Ubuntu 22.04 LTS) instalá el paquete `tomli`:
+    `pip3 install tomli` o `sudo apt install python3-tomli`.
 - Acceso `sudo` para crear el servicio y abrir el puerto.
 - El puerto del servidor accesible desde Internet (IP pública directa o
   port-forward en el router — ver §7).
