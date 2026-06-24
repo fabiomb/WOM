@@ -29,8 +29,9 @@ producen tropas, pueblos que dan comida y batallas autoresueltas. Hecho en
   scoring de objetivos, balanceados por simulación masiva.
 - **Tres modos de victoria**: conquista total, captura de banderas o límite de
   turnos.
-- **Multijugador humano vs humano por red local** (LAN), con chat en partida
-  (ver más abajo).
+- **Multijugador humano vs humano** de 2 a 4 jugadores: por **red local** (LAN /
+  IP directa) o por **Internet** con un **servidor dedicado** (lobby con chat,
+  varias partidas a la vez y reconexión); con chat en partida (ver más abajo).
 - **Jugador LLM**: un modelo de lenguaje (local con Ollama/LM Studio, u online
   con Gemini, Claude o ChatGPT) puede jugar como rival, conectándose a la
   partida como un cliente de red más (ver más abajo).
@@ -63,6 +64,33 @@ turno sobre las mismas órdenes y seed, así que solo viajan las órdenes por la
 red (el host es la autoridad y resincroniza ante cualquier divergencia). El
 panel lateral muestra el chat, el estado de la conexión y el reloj de turno
 (opcional). Si un jugador sale al menú, el rival es avisado al instante.
+
+## Multijugador por Internet (servidor dedicado)
+
+Además del juego LAN, WOM trae un **servidor dedicado** para jugar por Internet:
+un proceso stand-alone (carpeta `server/`, **solo stdlib** — sin pygame ni
+assets) que se instala en un host abierto y aloja un **lobby con chat** y
+**varias partidas a la vez**, actuando como **autoridad** de cada una (resuelve
+los turnos y las batallas igual que el host en LAN, pero **sin ser jugador**).
+
+Desde el cliente, en **Multijugador → Jugar por Internet**: se administra una
+**lista de servidores** (guardada en `settings.json`), se entra a uno y se ve el
+lobby con los jugadores conectados, el **chat global** y el **catálogo de
+partidas**. Desde ahí se **crea** o se **une** a una partida; con todos «Listo»
+arranca igual que en LAN. Si te caés, podés **reconectarte** a la partida en
+curso (la IA cubre tu lugar mientras tanto), y al terminar volvés al lobby.
+
+```bash
+python tools/pack_server.py                       # arma el paquete mínimo (dist/wom-server)
+python -m server --config server.toml --check     # valida la instalación
+python -m server --config server.toml             # corre el servidor
+```
+
+Reusa el mismo lockstep determinista del modo LAN, con topes anti-DDOS
+(conexiones por IP, rate-limit de mensajes, timeout de handshake) y entrada libre
+o con contraseña. Diseño en [`docs/server.md`](docs/server.md); instalación,
+servicio systemd y apertura de puerto/firewall en
+[`docs/server_deploy.md`](docs/server_deploy.md).
 
 ## Jugador LLM (modelo de lenguaje como rival)
 
@@ -144,6 +172,10 @@ aleatorio/secuencial — todo queda guardado en `settings.json`.
   IA, persistencia y roadmap.
 - [`docs/multiplayer.md`](docs/multiplayer.md) — diseño del modo multijugador
   (lockstep determinista, protocolo de red, sincronización).
+- [`docs/server.md`](docs/server.md) — diseño del servidor online dedicado
+  (lobby, partidas autoritativas, anti-DDOS, concurrencia).
+- [`docs/server_deploy.md`](docs/server_deploy.md) — manual de despliegue del
+  servidor (systemd, apertura de puerto y firewall en Linux).
 - [`docs/llm.md`](docs/llm.md) — diseño del jugador LLM (observación, gramática
   de acciones, backends y cómo correrlo).
 - [`CLAUDE.md`](CLAUDE.md) — guía de arquitectura para desarrollo (capas,
@@ -158,9 +190,10 @@ lo verifica):
 wom/core/         lógica pura: mapa, ejércitos, turnos, batallas, victoria
 wom/ai/           jugadores IA (emiten las mismas Orders que un humano)
 wom/ui/           pygame: render, input, menú, animaciones
-wom/net/          multijugador LAN: lockstep determinista (tampoco importa pygame)
+wom/net/          multijugador: lockstep determinista, lobby y servidor (sin pygame)
 wom/llm/          jugador LLM: observación, acciones y backends (tampoco importa pygame)
 wom/persistence/  savegames JSON en saves/
+server/           servidor online dedicado stand-alone (stdlib, sin pygame)
 data/config/      todo el balance en JSON (clases, batalla, IA)
 data/assets/      sprites PNG
 ```
