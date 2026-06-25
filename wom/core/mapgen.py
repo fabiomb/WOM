@@ -82,6 +82,24 @@ class MapParams:
             raise ValueError("se necesita al menos un fuerte inicial por jugador")
 
 
+# Tamaños de mapa preestablecidos: nombre → (ancho, alto, forts, towns). Los usan
+# el menú de Nueva partida y el servidor dedicado al crear una partida; viven en
+# este módulo puro para que el servidor no dependa de la UI.
+MAP_SIZES: dict[str, tuple[int, int, int, int]] = {
+    "chico": (22, 15, 3, 4),
+    "medio": (30, 20, 4, 6),
+    "grande": (44, 29, 6, 9),
+    "super grande": (60, 40, 9, 14),
+}
+
+
+def map_params_for(size: str, n_players: int, seed: int) -> MapParams:
+    """`MapParams` para un tamaño preestablecido (cae a 'medio' si no existe);
+    asegura al menos un fuerte inicial por jugador."""
+    width, height, forts, towns = MAP_SIZES.get(size, MAP_SIZES["medio"])
+    return MapParams(width, height, max(forts, n_players), towns, seed, n_players=n_players)
+
+
 def generate_map(params: MapParams, rng: random.Random) -> WorldMap:
     """Genera un mapa aleatorio que cumple las garantías del módulo."""
     for attempt in range(MAX_ATTEMPTS):

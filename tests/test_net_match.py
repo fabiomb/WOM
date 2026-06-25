@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from wom.ai.ai_player import AIPlayer
 from wom.core.game import Game, Player
-from wom.core.mapgen import MapParams
+from wom.core.mapgen import MAP_SIZES, MapParams
 from wom.core.orders import MoveOrder
 from wom.core.victory import VictoryMode
 from wom.core.worldmap import WorldMap
@@ -221,6 +221,29 @@ def test_hash_divergente_dispara_statesync():
 
 
 # --- construcción desde escenario -----------------------------------------
+
+
+def test_builder_respeta_el_tamano_de_mapa():
+    spec = MatchSpec(name="t", max_players=2, map_source="random", rules={"map_size": "chico"})
+    game = default_game_builder(spec, seed=1, names={0: "a", 1: "b"})
+    w, h, _f, _t = MAP_SIZES["chico"]
+    assert game.world.width == w and game.world.height == h
+    # Sin map_size cae a 'medio'.
+    game2 = default_game_builder(MatchSpec(name="t", max_players=2, map_source="random"), seed=1, names={})
+    assert game2.world.width == MAP_SIZES["medio"][0]
+
+
+def test_chat_de_sala_se_relaya_entre_jugadores():
+    from wom.net.protocol import Chat
+
+    sink = FakeSink()
+    spec = MatchSpec(name="t", max_players=2, map_source="random")
+    runner = MatchRunner(1, spec, sink, seed=2)
+    runner.player_joined(0, 100, "P0")
+    runner.player_joined(1, 101, "P1")  # sala llena (fase ROOM)
+    runner.handle(0, 100, Chat(name="P0", text="hola sala", ts=0.0))
+    assert any(m.text == "hola sala" for m in sink.of(101, Chat))  # le llega al otro
+    assert not any(m.text == "hola sala" for m in sink.of(100, Chat))  # sin eco al emisor
 
 
 def test_construye_la_partida_desde_un_escenario():

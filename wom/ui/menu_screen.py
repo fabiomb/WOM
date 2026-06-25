@@ -21,7 +21,7 @@ from pathlib import Path
 import pygame
 
 from wom import __version__
-from wom.core.mapgen import MapParams
+from wom.core.mapgen import MAP_SIZES, MapParams
 from wom.core.victory import VictoryMode
 from wom.core.worldmap import MAX_PLAYERS
 from wom.persistence.savegame import list_saves, save_info
@@ -32,15 +32,8 @@ from wom.ui.assets import ASSETS_DIR
 from wom.ui.music import MusicPlayer
 from wom.ui.video import RESOLUTIONS, apply_video_settings
 
-# Tamaños de mapa que ofrece el menú: nombre → (ancho, alto, forts, towns).
-# Con el zoom de la rueda los mapas grandes son navegables aunque el tile
-# base quede chico (la vista inicial siempre encuadra el mapa entero).
-MAP_SIZES: dict[str, tuple[int, int, int, int]] = {
-    "chico": (22, 15, 3, 4),
-    "medio": (30, 20, 4, 6),
-    "grande": (44, 29, 6, 9),
-    "super grande": (60, 40, 9, 14),
-}
+# MAP_SIZES (tamaños de mapa preestablecidos) vive en wom.core.mapgen (módulo
+# puro, compartido con el servidor dedicado); se reexporta acá por compatibilidad.
 AI_LEVELS = ["facil", "medio", "dificil"]
 VICTORY_MODES = [VictoryMode.TOTAL, VictoryMode.FLAGS, VictoryMode.TIME]
 VICTORY_LABELS = {

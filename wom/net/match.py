@@ -25,7 +25,7 @@ from enum import Enum, auto
 from typing import Callable, Protocol
 
 from wom.core.game import Game, Player
-from wom.core.mapgen import MapParams
+from wom.core.mapgen import map_params_for
 from wom.core.orders import (
     CreateArmyOrder,
     MoveOrder,
@@ -89,8 +89,8 @@ def default_game_builder(
         doc = scenario_loader(spec.map_ref)
         game = Game.from_setup(doc.world, players, doc.army_specs, doc.victory_mode, seed=seed)
     else:
-        params = MapParams(24, 16, max(3, n), 4, seed, n_players=n)
-        game = Game.new(params, players, VictoryMode.TOTAL)
+        size = str(spec.rules.get("map_size", "medio"))
+        game = Game.new(map_params_for(size, n, seed), players, VictoryMode.TOTAL)
     rules = MatchRules.from_dict(spec.rules)
     game.turn_limit = rules.max_turns
     return game

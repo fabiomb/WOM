@@ -16,9 +16,11 @@ from __future__ import annotations
 import pygame
 
 from wom.core.game import Game
+from wom.core.mapgen import MAP_SIZES
 from wom.core.worldmap import MAX_PLAYERS
 from wom.net.rules import MatchRules
 from wom.net.server_session import (
+    ChatReceived,
     Connected,
     Disconnected,
     ErrorReceived,
@@ -78,7 +80,9 @@ class ServerBrowserScreen:
         self.f_mturnsecs = TextField("0", numeric=True, max_len=4)
         self.f_mmaxturns = TextField("50", numeric=True, max_len=4)
         self.create_players = 2
-        self.chat_log: list[tuple[str, str]] = []
+        self.create_size = "medio"  # tamaño de mapa de la partida a crear
+        self.chat_log: list[tuple[str, str]] = []      # chat global del lobby
+        self.room_chat_log: list[tuple[str, str]] = []  # chat de la sala (partida)
         self.selected_match: int | None = None
         self._match_rows: dict[int, pygame.Rect] = {}
 
@@ -93,6 +97,7 @@ class ServerBrowserScreen:
         self.status = (
             f"De vuelta en el lobby de {session.server_name}." if session is not None else ""
         )
+        self.status_error = False  # resalta el status (rojo) cuando es un rechazo/error
 
     @property
     def capturing_text(self) -> bool:
@@ -122,15 +127,18 @@ class ServerBrowserScreen:
     def _on_net_event(self, event) -> None:
         if isinstance(event, Connected):
             self.mode = "lobby"
-            self.status = f"Conectado a {event.server_name}."
+            self._set_status(f"Conectado a {event.server_name}.")
         elif isinstance(event, Rejected):
-            self.status = f"Conexión rechazada: {event.reason}"
+            self._set_status(f"No se pudo entrar: {event.reason}", error=True)
             self._disconnect(to="browser")
         elif isinstance(event, Disconnected):
-            self.status = f"Desconectado: {event.reason}"
+            self._set_status(f"Desconectado: {event.reason}", error=True)
             self._disconnect(to="browser")
         elif isinstance(event, ErrorReceived):
-            self.status = event.message
+            self._set_status(event.message, error=True)
+        elif isinstance(event, ChatReceived):  # chat DENTRO de la sala/partida
+            self.room_chat_log.append((event.name, event.text))
+            del self.room_chat_log[:-CHAT_LOG_MAX]
         elif isinstance(event, LobbyChatReceived):
             self.chat_log.append((event.name, event.text))
             del self.chat_log[:-CHAT_LOG_MAX]
@@ -143,13 +151,18 @@ class ServerBrowserScreen:
             self.match_id = event.match_id
             self.seat = event.seat
             self.local_ready = False
+            self.room_chat_log = []
             self.mode = "room"
-            self.status = "En la sala. Marcá «Listo» cuando estés."
+            self._set_status("En la sala. Chateá y marcá «Listo» cuando estés.")
         elif isinstance(event, GameReady):
             self._setup = event.setup
             self.seat = event.setup.human_id
         elif isinstance(event, Started):
             self._begin_game()
+
+    def _set_status(self, text: str, error: bool = False) -> None:
+        self.status = text
+        self.status_error = error
 
     def _begin_game(self) -> None:
         if self._setup is None:
@@ -190,9 +203,13 @@ class ServerBrowserScreen:
 
     def _send_chat(self) -> None:
         text = self.f_chat.value.strip()
-        if text and self.session is not None:
-            self.session.send_lobby_chat(text)
-            self.f_chat.value = ""
+        if not text or self.session is None:
+            return
+        if self.mode == "room":
+            self.session.send_chat(text)  # chat de la sala/partida
+        else:
+            self.session.send_lobby_chat(text)  # chat global del lobby
+        self.f_chat.value = ""
 
     def _click(self, point: tuple[int, int]) -> None:
         field_hit = next((f for f, r in self._fields.items() if r.collidepoint(point)), None)
@@ -236,6 +253,9 @@ class ServerBrowserScreen:
             self.create_players = self.create_players % MAX_PLAYERS + 1
             if self.create_players < 2:
                 self.create_players = 2
+        elif hit == "cmsize":
+            sizes = list(MAP_SIZES)
+            self.create_size = sizes[(sizes.index(self.create_size) + 1) % len(sizes)]
         elif hit == "create_do":
             self._create_match()
         elif hit == "cancel_create":
@@ -255,6 +275,7 @@ class ServerBrowserScreen:
         rules = {
             "turn_seconds": int(self.f_mturnsecs.value or 0),
             "max_turns": int(self.f_mmaxturns.value or 50),
+            "map_size": self.create_size,
         }
         self.session.create_match(
             name=self.f_mname.value.strip() or "Partida",
@@ -310,7 +331,7 @@ class ServerBrowserScreen:
     def _save_form(self) -> None:
         host = self.f_shost.value.strip()
         if not host:
-            self.status = "Falta la dirección del servidor."
+            self._set_status("Falta la dirección del servidor.", error=True)
             return
         name = self.f_sname.value.strip() or host
         port = int(self.f_sport.value or DEFAULT_PORT)
@@ -340,7 +361,7 @@ class ServerBrowserScreen:
 
     def _connect(self) -> None:
         if self.selected is None or not self.servers:
-            self.status = "Elegí un servidor de la lista."
+            self._set_status("Elegí un servidor de la lista.", error=True)
             return
         self._persist()
         s = self.servers[self.selected]
@@ -349,11 +370,11 @@ class ServerBrowserScreen:
         try:
             conn = connect(host, port, timeout=CONNECT_TIMEOUT)
         except OSError:
-            self.status = f"No se pudo conectar a {host}:{port}"
+            self._set_status(f"No se pudo conectar a {host}:{port}", error=True)
             return
         self.session = ServerSession(conn, self.f_player.value.strip() or "Jugador")
         self.mode = "connecting"
-        self.status = f"Conectando a {host}…"
+        self._set_status(f"Conectando a {host}…")
 
     def _disconnect(self, to: str = "browser") -> None:
         if self.session is not None:
@@ -384,6 +405,19 @@ class ServerBrowserScreen:
             "room": self._draw_room,
         }[self.mode](surface, area)
         if self.status:
+            self._draw_status(surface, window)
+
+    def _draw_status(self, surface: pygame.Surface, window: pygame.Rect) -> None:
+        """Línea de estado. Si es un error/rechazo, va en una barra resaltada
+        (rojo) para que el motivo no pase desapercibido."""
+        if self.status_error:
+            label = self.font.render(self.status, True, (255, 235, 230))
+            box = label.get_rect(center=(window.centerx, window.bottom - 40))
+            box.inflate_ip(40, 16)
+            pygame.draw.rect(surface, (150, 50, 45), box, border_radius=8)
+            pygame.draw.rect(surface, (210, 90, 80), box, width=2, border_radius=8)
+            surface.blit(label, label.get_rect(center=box.center))
+        else:
             label = self.small_font.render(self.status, True, theme.TEXT_DIM)
             surface.blit(label, label.get_rect(center=(window.centerx, window.bottom - 30)))
 
@@ -477,6 +511,8 @@ class ServerBrowserScreen:
         y += 50
         y = self._field(surface, "mname", "Nombre de la partida", self.f_mname, area, y)
         y = self._button(surface, "cmplayers", f"Jugadores:  {self.create_players}", area, y, option=True)
+        w, h, _f, _t = MAP_SIZES[self.create_size]
+        y = self._button(surface, "cmsize", f"Mapa:  {self.create_size} ({w}x{h})", area, y, option=True)
         y = self._field(surface, "mmaxturns", "Turnos máximos", self.f_mmaxturns, area, y)
         y = self._field(surface, "mturnsecs", "Segundos por turno (0 = sin límite)", self.f_mturnsecs, area, y)
         y = self._button(surface, "create_do", "Crear", area, y + 8)
@@ -499,7 +535,16 @@ class ServerBrowserScreen:
         surface.blit(self.small_font.render(wait, True, theme.TEXT_DIM), (area.x + 40, y))
         y += 34
         y = self._button(surface, "ready", "Cancelar listo" if self.local_ready else "¡Listo!", area, y)
-        self._button(surface, "leaveroom", "Salir de la sala", area, y, option=True)
+        y = self._button(surface, "leaveroom", "Salir de la sala", area, y, option=True)
+        # Chat de la sala (entre quienes se sumaron, hasta arrancar).
+        cap = self.small_font.render("Chat de la sala", True, theme.TEXT_DIM)
+        surface.blit(cap, (area.x + 40, y + 6))
+        y += 30
+        for who, text in self.room_chat_log[-5:]:
+            chat_line = self.small_font.render(f"{who}: {text}", True, theme.TEXT)
+            surface.blit(chat_line, (area.x + 50, y))
+            y += 22
+        self._field(surface, "chat", "Mensaje (Enter envía)", self.f_chat, area, y + 2)
 
     # --- helpers de dibujo ----------------------------------------------
 

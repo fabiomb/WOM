@@ -165,6 +165,65 @@ def test_conecta_a_un_lobbyserver_real(screen, tmp_path):
         server.close()
 
 
+def test_rechazo_resalta_el_status(screen, tmp_path):
+    from wom.net.server_session import Rejected
+
+    sb = ServerBrowserScreen(settings_path=tmp_path / "s.json")
+    sb._on_net_event(Rejected("ese nombre ya está en uso"))
+    assert sb.status_error is True
+    assert "nombre" in sb.status
+    assert sb.mode == "browser"
+    sb.draw(screen)  # dibuja la barra de error resaltada sin romper
+
+
+def test_create_form_incluye_tamano_de_mapa(screen, tmp_path):
+    captured = {}
+
+    class _FakeSession:
+        def create_match(self, **kw):
+            captured.update(kw)
+
+    sb = ServerBrowserScreen(settings_path=tmp_path / "s.json")
+    sb.session = _FakeSession()
+    sb.mode = "createform"
+    assert sb.create_size == "medio"
+    sb._activate("cmsize")  # cicla a otro tamaño
+    assert sb.create_size != "medio"
+    sb._create_match()
+    assert captured["map_source"] == "random"
+    assert captured["rules"]["map_size"] == sb.create_size
+
+
+def test_chat_de_sala_se_muestra_y_se_envia_segun_modo(screen, tmp_path):
+    from wom.net.server_session import ChatReceived
+
+    calls = []
+
+    class _FakeSession:
+        matches = []
+
+        def send_chat(self, t):
+            calls.append(("match", t))
+
+        def send_lobby_chat(self, t):
+            calls.append(("lobby", t))
+
+    sb = ServerBrowserScreen(settings_path=tmp_path / "s.json")
+    sb.session = _FakeSession()
+    # Chat recibido en la sala se acumula y se dibuja.
+    sb.mode = "room"
+    sb._on_net_event(ChatReceived("Beto", "hola sala", 0.0))
+    assert ("Beto", "hola sala") in sb.room_chat_log
+    sb.draw(screen)
+    # Enviar: en la sala va al chat de partida; en el lobby al global.
+    sb.f_chat.value = "r"
+    sb._send_chat()
+    sb.mode = "lobby"
+    sb.f_chat.value = "g"
+    sb._send_chat()
+    assert calls == [("match", "r"), ("lobby", "g")]
+
+
 def test_retomar_lobby_desde_sesion_viva(screen):
     sess = ServerSession(_FakeConn(), "Ana")
     sess.server_name = "Srv"
