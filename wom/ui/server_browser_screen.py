@@ -206,9 +206,14 @@ class ServerBrowserScreen:
         if not text or self.session is None:
             return
         if self.mode == "room":
-            self.session.send_chat(text)  # chat de la sala/partida
+            # El servidor relaya el chat de la sala SIN eco al emisor, así que
+            # sumamos el mensaje propio al log local para verlo (como el chat
+            # en partida). El chat global del lobby sí vuelve del servidor.
+            self.session.send_chat(text)
+            self.room_chat_log.append((self.session.name, text))
+            del self.room_chat_log[:-CHAT_LOG_MAX]
         else:
-            self.session.send_lobby_chat(text)  # chat global del lobby
+            self.session.send_lobby_chat(text)  # chat global del lobby (vuelve a todos)
         self.f_chat.value = ""
 
     def _click(self, point: tuple[int, int]) -> None:

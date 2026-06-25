@@ -201,6 +201,7 @@ def test_chat_de_sala_se_muestra_y_se_envia_segun_modo(screen, tmp_path):
 
     class _FakeSession:
         matches = []
+        name = "Yo"
 
         def send_chat(self, t):
             calls.append(("match", t))
@@ -218,6 +219,7 @@ def test_chat_de_sala_se_muestra_y_se_envia_segun_modo(screen, tmp_path):
     # Enviar: en la sala va al chat de partida; en el lobby al global.
     sb.f_chat.value = "r"
     sb._send_chat()
+    assert ("Yo", "r") in sb.room_chat_log  # ve su propio mensaje en la sala
     sb.mode = "lobby"
     sb.f_chat.value = "g"
     sb._send_chat()
