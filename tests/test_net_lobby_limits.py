@@ -85,9 +85,15 @@ def test_rate_limit_cierra_al_que_inunda():
         _pump(lobby, [conn], lambda _i: lobby.player_count == 1)
         for _ in range(60):  # inunda muy por encima del burst
             conn.send(LobbyChat(name="Flood", text="spam", ts=0.0))
-        inbox = _pump(lobby, [conn], lambda _i: lobby.player_count == 0 or not conn.alive)
+        # El server manda Error(RATE_LIMITED) justo antes de cerrar: hay que
+        # esperar a recibirlo (en CI puede tardar unas iteraciones más que el
+        # drop), no cortar apenas player_count llega a 0.
+        def _got_rate_limited(i):
+            return any(isinstance(m, Error) and m.code == "RATE_LIMITED" for m in i[conn])
+
+        inbox = _pump(lobby, [conn], _got_rate_limited)
+        assert _got_rate_limited(inbox)
         assert lobby.player_count == 0
-        assert any(isinstance(m, Error) and m.code == "RATE_LIMITED" for m in inbox[conn])
     finally:
         lobby.shutdown()
         conn.close()
