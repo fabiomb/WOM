@@ -23,12 +23,20 @@ class Hud:
         # que los botones se reacomodan dejando lugar al panel de red abajo.
         self.net_mode = net_mode
         self.title_font = pygame.font.SysFont(None, 34)
-        self.result_font = pygame.font.SysFont(None, 64)
         self.font = pygame.font.SysFont(None, 22)
         self.small_font = pygame.font.SysFont(None, 18)
+        # Fin de partida: tipografías más grandes para que el resultado se lea
+        # claro (título grande + resumen a buen tamaño).
+        self.result_title_font = pygame.font.SysFont(None, 88)
+        self.result_stat_font = pygame.font.SysFont(None, 32)
+        self.result_hint_font = pygame.font.SysFont(None, 24)
         # Ilustraciones de fin de partida (victoria/derrota), cargadas a
         # demanda; None si el asset falta.
         self._result_images: dict[str, pygame.Surface | None] = {}
+        # Video de fin de partida (victory.mp4/defeat.mp4): se reproduce ~5s y
+        # funde a la imagen. None hasta que la pantalla de fin lo dispara.
+        self._result_video: object | None = None
+        self._result_video_name: str | None = None
         x, w, bottom = rect.x + 20, rect.width - 40, rect.bottom
         self.button = pygame.Rect(x, bottom - 60, w, 42)  # fin del turno
         if net_mode:
@@ -305,6 +313,12 @@ class Hud:
             )
         return y + 4
 
+    # Medidas del panel "pergamino" de fin de partida.
+    _RESULT_PAD = 36          # margen interno de la caja
+    _RESULT_GAP = 36          # separación entre la columna media y el texto
+    _RESULT_MEDIA = 440       # lado de la ilustración/video (cuadrado)
+    _RESULT_TEXT_W = 600      # ancho de la columna de resumen
+
     def _draw_game_over(
         self, surface: pygame.Surface, game: Game, result: VictoryResult
     ) -> None:
@@ -313,19 +327,26 @@ class Hud:
         surface.blit(overlay, (0, 0))
 
         if result.winner is None:
-            title_text, color, image_name = "Empate", theme.TEXT, None
+            title_text, color, image_name = "Empate", theme.PARCHMENT_INK, None
         elif result.winner == self.human_id:
-            title_text, color, image_name = "¡Victoria!", (235, 205, 90), "victory"
+            title_text, color, image_name = "¡Victoria!", theme.VICTORY_INK, "victory"
         else:
-            title_text, color, image_name = "Derrota", (210, 80, 80), "defeat"
+            title_text, color, image_name = "Derrota", theme.DEFEAT_INK, "defeat"
 
-        image = self._result_image(image_name) if image_name else None
+        media_side = self._RESULT_MEDIA if image_name else 0
+        image = (
+            self._result_image(image_name, media_side) if image_name else None
+        )
+        if image is None:
+            media_side = 0  # sin ilustración: solo la columna de texto
 
-        cx = surface.get_rect().centerx
-        # Líneas de estadística que se muestran bajo la imagen.
+        # --- contenido de la columna de resumen (texto) -------------------
         human = game.players[self.human_id]
+        title = self.result_title_font.render(title_text, True, color)
+        reason_lines = self._wrap(
+            self._result_reason(result), self.result_stat_font, self._RESULT_TEXT_W
+        )
         stats: list[str] = [
-            self._result_reason(result),
             "",
             f"Turnos jugados: {game.turn}",
             f"Batallas libradas: {game.battles_fought}",
@@ -337,33 +358,122 @@ class Hud:
         total_losses = sum(p.troops_lost for p in game.players)
         stats.append(f"Bajas totales: {total_losses}")
 
-        # Alto total del bloque para centrarlo verticalmente.
-        title = self.result_font.render(title_text, True, color)
-        line_h = self.font.get_height() + 6
-        block_h = title.get_height() + 18
+        stat_h = self.result_stat_font.get_height() + 8
+        rule_gap = 22
+        text_h = title.get_height() + 14 + rule_gap
+        text_h += len(reason_lines) * stat_h + 8
+        text_h += sum(stat_h if line else stat_h // 2 for line in stats)
+        text_h += 22 + self.result_hint_font.get_height()
+
+        pad, gap = self._RESULT_PAD, self._RESULT_GAP
+        content_h = max(media_side, text_h)
+        box_w = pad * 2 + media_side + (gap if media_side else 0) + self._RESULT_TEXT_W
+        box_h = pad * 2 + content_h
+        box = pygame.Rect(0, 0, box_w, box_h)
+        box.center = surface.get_rect().center
+
+        # --- panel de pergamino con borde de tinta ------------------------
+        pygame.draw.rect(surface, theme.PARCHMENT_BG, box, border_radius=14)
+        lower = pygame.Rect(box.x, box.centery, box.w, box.h // 2)
+        pygame.draw.rect(
+            surface, theme.PARCHMENT_BG_DARK, lower,
+            border_bottom_left_radius=14, border_bottom_right_radius=14,
+        )
+        pygame.draw.rect(surface, theme.PARCHMENT_BORDER, box, 3, border_radius=14)
+        pygame.draw.rect(
+            surface, theme.PARCHMENT_BORDER, box.inflate(-12, -12), 1, border_radius=10
+        )
+
+        # --- columna media: ilustración + (si aplica) video por encima ----
         if image is not None:
-            block_h += image.get_height() + 18
-        block_h += len(stats) * line_h + 12 + self.small_font.get_height()
+            media = pygame.Rect(0, 0, media_side, media_side)
+            media.topleft = (box.x + pad, box.centery - media_side // 2)
+            surface.blit(image, image.get_rect(center=media.center))
+            self._draw_result_video(surface, media, image_name)
+            pygame.draw.rect(
+                surface, theme.PARCHMENT_BORDER, media.inflate(8, 8), 3, border_radius=6
+            )
 
-        y = surface.get_rect().centery - block_h // 2
-        surface.blit(title, title.get_rect(midtop=(cx, y)))
-        y += title.get_height() + 18
+        # --- columna de resumen -------------------------------------------
+        tx = box.x + pad + (media_side + gap if media_side else 0)
+        ty = box.centery - text_h // 2
+        surface.blit(title, (tx, ty))
+        ty += title.get_height() + 14
+        pygame.draw.line(
+            surface, theme.PARCHMENT_BORDER, (tx, ty), (tx + self._RESULT_TEXT_W, ty), 2
+        )
+        ty += rule_gap
 
-        if image is not None:
-            surface.blit(image, image.get_rect(midtop=(cx, y)))
-            y += image.get_height() + 18
-
+        for line in reason_lines:
+            rendered = self.result_stat_font.render(line, True, theme.PARCHMENT_INK)
+            surface.blit(rendered, (tx, ty))
+            ty += stat_h
+        ty += 8
         for line in stats:
             if not line:
-                y += line_h // 2
+                ty += stat_h // 2
                 continue
-            rendered = self.font.render(line, True, theme.TEXT)
-            surface.blit(rendered, rendered.get_rect(midtop=(cx, y)))
-            y += line_h
+            rendered = self.result_stat_font.render(line, True, theme.PARCHMENT_INK_DIM)
+            surface.blit(rendered, (tx, ty))
+            ty += stat_h
 
-        y += 12
-        hint = self.small_font.render("ESC para volver al menú", True, theme.TEXT_DIM)
-        surface.blit(hint, hint.get_rect(midtop=(cx, y)))
+        ty += 22
+        hint = self.result_hint_font.render(
+            "ESC para volver al menú", True, theme.PARCHMENT_INK_DIM
+        )
+        surface.blit(hint, (tx, ty))
+
+    @staticmethod
+    def _wrap(text: str, font: pygame.font.Font, max_w: int) -> list[str]:
+        """Parte `text` en líneas que entren en `max_w` (corte por palabras)."""
+        words = text.split()
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            probe = f"{current} {word}".strip()
+            if font.size(probe)[0] <= max_w or not current:
+                current = probe
+            else:
+                lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines or [""]
+
+    def _draw_result_video(
+        self, surface: pygame.Surface, rect: pygame.Rect, name: str
+    ) -> None:
+        """Reproduce el clip de fin de partida sobre la ilustración (que queda
+        de base): arranca el video la primera vez y lo va dibujando. Degrada a
+        la imagen fija si no se puede reproducir (headless, sin ffmpeg)."""
+        from wom.ui.videoclip import VideoClip, can_play_video
+
+        if not can_play_video():
+            return
+        if self._result_video_name != name:
+            self.close_result_video()
+            mp4 = assets.ASSETS_DIR / f"{name}.mp4"
+            self._result_video = VideoClip(mp4, (rect.width, rect.height))
+            self._result_video_name = name
+        clip = self._result_video
+        if clip is not None and getattr(clip, "available", False):
+            clip.draw(surface, rect)
+
+    def result_video_audible(self) -> bool:
+        """True si el clip de fin de partida está sonando ahora mismo (para que
+        GameScreen agache la música mientras dure)."""
+        clip = self._result_video
+        return clip is not None and getattr(clip, "audible", False)
+
+    def close_result_video(self) -> None:
+        """Libera el clip de fin de partida (corta ffmpeg/audio). La llama
+        GameScreen al salir al menú."""
+        if self._result_video is not None:
+            close = getattr(self._result_video, "close", None)
+            if callable(close):
+                close()
+        self._result_video = None
+        self._result_video_name = None
 
     def _result_reason(self, result: VictoryResult) -> str:
         """Motivo del fin de partida redactado desde la perspectiva del
@@ -389,24 +499,19 @@ class Hud:
             )
         return result.reason
 
-    def _result_image(self, name: str) -> pygame.Surface | None:
-        """Carga (y cachea) la ilustración de victoria/derrota, escalada para
-        caber en la pantalla. Devuelve None si el asset no existe."""
-        if name not in self._result_images:
-            self._result_images[name] = assets.load_image(name)
-        image = self._result_images[name]
-        if image is None:
-            return None
-        max_w = min(420, self.rect.left - 40 if self.rect.left > 80 else 420)
-        max_h = 320
-        w, h = image.get_size()
-        factor = min(max_w / w, max_h / h, 1.0)
-        if factor < 1.0:
-            image = pygame.transform.smoothscale(
-                image, (max(1, int(w * factor)), max(1, int(h * factor)))
+    def _result_image(self, name: str, side: int) -> pygame.Surface | None:
+        """Carga (y cachea) la ilustración de victoria/derrota escalada a un
+        cuadrado de `side`×`side` (mismo encuadre que el video). None si falta.
+
+        Se cachea por `(name, side)` para no reescalar cada frame."""
+        key = f"{name}@{side}"
+        if key not in self._result_images:
+            original = assets.load_image(name)
+            self._result_images[key] = (
+                pygame.transform.smoothscale(original, (side, side))
+                if original is not None else None
             )
-            self._result_images[name] = image
-        return image
+        return self._result_images[key]
 
     def _text(self, surface, text, x, y, font, color=theme.TEXT) -> int:
         rendered = font.render(text, True, color)

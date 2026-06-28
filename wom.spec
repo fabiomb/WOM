@@ -15,9 +15,31 @@ Pillow al compilar. Linux no embebe icono en el ejecutable.
 """
 
 import os
+import shutil
 import sys
 
 _ASSETS = os.path.join("data", "assets")
+
+# ffmpeg estático para los videos de fin de partida (victory.mp4/defeat.mp4).
+# Lo tomamos de imageio-ffmpeg (un binario por OS) y lo copiamos al bundle como
+# data/bin/ffmpeg[.exe], que es el primer lugar donde lo busca
+# wom/ui/videoclip.py. Si imageio-ffmpeg no está, el juego degrada al PNG fijo.
+_ffmpeg_datas = []
+try:
+    import imageio_ffmpeg
+
+    _src = imageio_ffmpeg.get_ffmpeg_exe()
+    _name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+    _stage = os.path.join("build", "ffmpeg_stage")
+    os.makedirs(_stage, exist_ok=True)
+    _dst = os.path.join(_stage, _name)
+    shutil.copy2(_src, _dst)
+    if sys.platform != "win32":
+        os.chmod(_dst, 0o755)
+    _ffmpeg_datas = [(_dst, os.path.join("data", "bin"))]
+except Exception as exc:  # sin imageio-ffmpeg: el build sale sin video (degrada)
+    print(f"[wom.spec] ffmpeg no empaquetado ({exc}); los videos degradan al PNG")
+
 if sys.platform == "darwin":
     _icon = os.path.join(_ASSETS, "icon.icns")
 elif sys.platform == "win32":
@@ -33,12 +55,14 @@ a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[],
-    datas=[("data", "data")],
+    datas=[("data", "data"), *_ffmpeg_datas],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["pytest"],
+    # El binario de ffmpeg ya va por data/bin (arriba); no hace falta empaquetar
+    # el paquete imageio-ffmpeg dentro del bundle.
+    excludes=["pytest", "imageio_ffmpeg"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

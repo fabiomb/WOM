@@ -52,6 +52,17 @@ PATH_ONGOING = (120, 120, 120)   # órdenes de turnos anteriores en curso
 BUTTON_BG = (60, 110, 60)
 BUTTON_BG_OVER = (80, 140, 80)
 GAMEOVER_BG = (0, 0, 0, 180)
+# Pantalla de fin de partida: panel "pergamino" con los mismos sepias que los
+# menúes (ver INK en menu_screen.py). El resultado se presenta en una caja con
+# borde sobre el fundido oscuro: ilustración/video a la izquierda, resumen a la
+# derecha.
+PARCHMENT_BG = (224, 201, 154)
+PARCHMENT_BG_DARK = (205, 180, 132)  # franja inferior para dar volumen al papel
+PARCHMENT_BORDER = (120, 92, 52)
+PARCHMENT_INK = (62, 40, 18)
+PARCHMENT_INK_DIM = (108, 82, 50)
+VICTORY_INK = (150, 92, 16)   # título de victoria (bronce/oro, legible en papel)
+DEFEAT_INK = (140, 38, 30)    # título de derrota (rojo oscuro)
 SPAWN_HIGHLIGHT = (250, 220, 60)  # anillos que señalan el ejército inicial
 CLASH_FLASH = (255, 200, 90)      # destello exterior del choque de batalla
 CLASH_CORE = (255, 245, 210)      # núcleo del destello

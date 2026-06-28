@@ -162,6 +162,30 @@ def test_cambiar_carpeta_recarga_la_playlist(tmp_path, fake_mixer):
     assert player.playing  # estaba sonando: sigue con la carpeta nueva
 
 
+def test_duck_baja_y_restaura_el_volumen(tmp_path, fake_mixer):
+    player = _player(tmp_path, music_volume=0.8)
+    player.start()
+    assert fake_mixer.music.volume == 0.8
+    player.duck()
+    assert fake_mixer.music.volume == pytest.approx(0.8 * MusicPlayer.DUCK_FACTOR)
+    player.duck()  # idempotente: no baja de nuevo
+    assert fake_mixer.music.volume == pytest.approx(0.8 * MusicPlayer.DUCK_FACTOR)
+    player.unduck()
+    assert fake_mixer.music.volume == 0.8
+    player.unduck()  # idempotente
+    assert fake_mixer.music.volume == 0.8
+
+
+def test_cambiar_volumen_mientras_esta_agachado(tmp_path, fake_mixer):
+    player = _player(tmp_path, music_volume=0.8)
+    player.start()
+    player.duck()
+    player.set_volume(0.4)  # el cambio respeta el agachado
+    assert fake_mixer.music.volume == pytest.approx(0.4 * MusicPlayer.DUCK_FACTOR)
+    player.unduck()
+    assert fake_mixer.music.volume == 0.4
+
+
 def test_settings_roundtrip(tmp_path):
     settings = Settings(
         music_enabled=False, music_volume=0.3, music_folder="x", music_shuffle=False

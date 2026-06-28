@@ -83,10 +83,14 @@ class GameScreen:
         net=None,
         turn_seconds: int = 0,
         intro: ScenarioIntroOverlay | None = None,
+        music=None,
     ):
         self.game = game
         self.human_id = human_id
         self.ai_level = ai_level  # fallback de nivel para el zoom de batalla
+        # Reproductor de música (opcional): se agacha mientras suena el clip de
+        # fin de partida y se restaura cuando termina.
+        self.music = music
         # Intro del escenario: modal con título/descripción/imagen sobre el
         # mapa al empezar (None en partidas normales). Se cierra con un clic.
         self.scenario_intro = intro
@@ -468,6 +472,9 @@ class GameScreen:
           al **menú**, para que el rival no quede esperando órdenes."""
         from wom.net.server_session import ServerSession
 
+        self.hud.close_result_video()  # corta el clip de fin de partida (ffmpeg/audio)
+        if self.music is not None:
+            self.music.unduck()  # restaura el volumen si se salió durante el clip
         if self.net is not None:
             if isinstance(self.net.session, ServerSession) and not self.net.disconnected:
                 self.net.session.leave_match()
@@ -764,6 +771,7 @@ class GameScreen:
         """Una vez por frame (la llama el loop de la app). Conduce el combate
         táctico si hay uno activo; en red conduce el lockstep y dispara la
         animación de cada turno; sin red ni batalla, no hace nada."""
+        self._update_result_audio()  # agacha la música mientras suena el clip de fin
         if self._tactical_battle is not None:
             self._tactical_battle.update()
             if self._tactical_battle.done:
@@ -796,6 +804,16 @@ class GameScreen:
             self._net_disconnect_shown = True
             self._notify(f"Rival desconectado: {self.net.disconnect_reason}")
         self._update_turn_timer()
+
+    def _update_result_audio(self) -> None:
+        """Baja la música mientras el clip de victoria/derrota está sonando y la
+        restaura al terminar (no-op si no hay reproductor)."""
+        if self.music is None:
+            return
+        if self.game_over and self.hud.result_video_audible():
+            self.music.duck()
+        else:
+            self.music.unduck()
 
     def _update_turn_timer(self) -> None:
         """Reloj de turno: cuenta solo mientras el humano puede dar órdenes; al

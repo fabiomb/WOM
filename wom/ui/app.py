@@ -91,15 +91,15 @@ def _players_for_map(doc, ai_levels: tuple[str, ...]) -> list[Player]:
     return players
 
 
-def scenario_game(choice: ScenarioChoice) -> GameScreen:
+def scenario_game(choice: ScenarioChoice, music=None) -> GameScreen:
     """Arranca un escenario completo: honra la IA y la victoria del `.wom` y
     muestra su intro (título/descripción/imagen) sobre el mapa al empezar."""
     doc = load_scenario(choice.path)
     intro = ScenarioIntroOverlay(doc.title, doc.description, doc.image_bytes)
-    return GameScreen(build_game(doc), human_id=HUMAN_ID, intro=intro)
+    return GameScreen(build_game(doc), human_id=HUMAN_ID, intro=intro, music=music)
 
 
-def _start_net_game(net_start) -> GameScreen:
+def _start_net_game(net_start, music=None) -> GameScreen:
     """Arranca la partida en red a partir del lobby (NetGameStart).
 
     El host recibe un `ai_factory`: si un rival se cae, la IA lo controla hasta
@@ -128,6 +128,7 @@ def _start_net_game(net_start) -> GameScreen:
         human_id=net_start.human_id,
         net=net,
         turn_seconds=net_start.rules.turn_seconds,
+        music=music,
     )
 
 
@@ -182,15 +183,17 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
             elif action == "editor":
                 current = EditorScreen()
             elif isinstance(action, NewGameChoice):
-                current = GameScreen(new_game(action), human_id=HUMAN_ID)
+                current = GameScreen(new_game(action), human_id=HUMAN_ID, music=music)
             elif isinstance(action, ScenarioChoice):
-                current = scenario_game(action)
+                current = scenario_game(action, music=music)
             elif isinstance(action, LoadChoice):
-                current = GameScreen(load_game(action.path), human_id=HUMAN_ID)
+                current = GameScreen(
+                    load_game(action.path), human_id=HUMAN_ID, music=music
+                )
         elif isinstance(current, MultiplayerScreen):
             current.update()  # conduce la red (lobby) una vez por frame
             if current.net_start is not None:
-                current = _start_net_game(current.net_start)
+                current = _start_net_game(current.net_start, music=music)
             elif current.wants_internet:
                 current = ServerBrowserScreen()
             elif current.wants_menu:
@@ -198,7 +201,7 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
         elif isinstance(current, ServerBrowserScreen):
             current.update()  # conduce la sesión con el servidor dedicado
             if current.net_start is not None:
-                current = _start_net_game(current.net_start)
+                current = _start_net_game(current.net_start, music=music)
             elif current.wants_menu:
                 current = MenuScreen(ai_level, seed, music=music)
         elif isinstance(current, EditorScreen):

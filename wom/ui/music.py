@@ -37,6 +37,7 @@ class MusicPlayer:
         self.position = 0              # posición dentro de `order`
         self.playing = False
         self.paused = False
+        self._ducked = False   # True: volumen bajado temporalmente (ver duck())
         self.available = False  # False: sin audio, todos los controles son no-op
         try:
             if not mixer.get_init():
@@ -162,7 +163,31 @@ class MusicPlayer:
         self.settings.music_volume = round(min(1.0, max(0.0, volume)), 2)
         self._save()
         if self.available:
-            mixer.music.set_volume(self.settings.music_volume)
+            mixer.music.set_volume(self._effective_volume())
+
+    # --- ducking (bajar el volumen mientras suena otra cosa) ---------------
+
+    DUCK_FACTOR = 0.25  # fracción del volumen mientras está agachado
+
+    def _effective_volume(self) -> float:
+        """Volumen real aplicado al mixer: el de settings, agachado si procede."""
+        base = self.settings.music_volume
+        return base * self.DUCK_FACTOR if self._ducked else base
+
+    def duck(self) -> None:
+        """Baja el volumen temporalmente (p. ej. mientras corre un video de fin
+        de partida). Idempotente; `unduck` lo restaura."""
+        if not self.available or self._ducked:
+            return
+        self._ducked = True
+        mixer.music.set_volume(self._effective_volume())
+
+    def unduck(self) -> None:
+        """Restaura el volumen tras un `duck`. Idempotente."""
+        if not self.available or not self._ducked:
+            return
+        self._ducked = False
+        mixer.music.set_volume(self._effective_volume())
 
     def set_folder(self, folder: str) -> None:
         self.settings.music_folder = folder

@@ -1,2 +1,6 @@
 pygame-ce>=2.5
 pytest>=8.0
+# ffmpeg estático (un binario por OS) para reproducir los videos de fin de
+# partida (victory.mp4/defeat.mp4). Opcional: sin él el juego degrada a la
+# imagen fija. El build (wom.spec) lo empaqueta en data/bin/.
+imageio-ffmpeg>=0.4
