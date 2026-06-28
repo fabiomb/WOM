@@ -41,7 +41,14 @@ from wom.persistence.settings import (
     update_server,
 )
 from wom.ui import scale, theme
-from wom.ui.multiplayer_screen import NetGameStart, TextField
+from wom.ui.assets import ASSETS_DIR
+from wom.ui.menu_screen import INK, INK_DIM, INK_HOVER
+from wom.ui.multiplayer_screen import (
+    SCROLL_AREA_WIDE,
+    TITLE_IMAGE_WIDE,
+    NetGameStart,
+    TextField,
+)
 
 CONNECT_TIMEOUT = 4.0
 CHAT_LOG_MAX = 8
@@ -56,13 +63,19 @@ class ServerBrowserScreen:
         self.wants_menu = False
         self._settings_path = settings_path
 
-        self.title_font = pygame.font.SysFont(None, 64)
+        self.title_font = pygame.font.SysFont(None, 48)
         self.font = pygame.font.SysFont(None, 30)
         self.small_font = pygame.font.SysFont(None, 22)
         self._buttons: dict[str, pygame.Rect] = {}
         self._fields: dict[str, pygame.Rect] = {}
         self._rows: dict[int, pygame.Rect] = {}
         self.focused: str | None = None
+
+        # Fondo "pergamino ancho" (mismo que la pantalla de Multijugador).
+        path = ASSETS_DIR / TITLE_IMAGE_WIDE
+        self.background = pygame.image.load(str(path)) if path.exists() else None
+        self._scaled_bg: pygame.Surface | None = None
+        self._on_scroll = False
 
         self._settings = load_settings(self._settings_path)
         self.servers: list[dict] = [dict(s) for s in self._settings.servers]
@@ -394,13 +407,13 @@ class ServerBrowserScreen:
         self._fields.clear()
         self._rows.clear()
         self._match_rows.clear()
-        surface.fill(theme.BACKGROUND)
         window = surface.get_rect()
-        title = self.title_font.render("Servidores", True, theme.TEXT)
-        surface.blit(title, title.get_rect(center=(window.centerx, 50)))
-        width = 760 if self.mode in ("lobby", "room") else 640
-        area = pygame.Rect(0, 110, width, window.height - 160)
-        area.centerx = window.centerx
+        area = self._paint_background(surface, window)
+        title = self.title_font.render(
+            "Jugar por Internet", True, INK if self._on_scroll else theme.TEXT
+        )
+        surface.blit(title, title.get_rect(midtop=(area.centerx, area.y)))
+        content = pygame.Rect(area.x, area.y + 50, area.width, area.height - 50)
         {
             "browser": self._draw_browser,
             "form": self._draw_form,
@@ -408,174 +421,326 @@ class ServerBrowserScreen:
             "lobby": self._draw_lobby,
             "createform": self._draw_createform,
             "room": self._draw_room,
-        }[self.mode](surface, area)
+        }[self.mode](surface, content)
         if self.status:
-            self._draw_status(surface, window)
+            self._draw_status(surface, content)
 
-    def _draw_status(self, surface: pygame.Surface, window: pygame.Rect) -> None:
+    def _paint_background(self, surface: pygame.Surface, window: pygame.Rect) -> pygame.Rect:
+        """Pinta el fondo y devuelve el área útil del pergamino ancho. Cae al
+        fondo plano de siempre si falta el asset."""
+        if self.background is not None:
+            if self._scaled_bg is None or self._scaled_bg.get_size() != window.size:
+                self._scaled_bg = pygame.transform.smoothscale(self.background, window.size)
+            surface.blit(self._scaled_bg, (0, 0))
+            x0, y0, x1, y1 = SCROLL_AREA_WIDE
+            self._on_scroll = True
+            return pygame.Rect(
+                round(window.width * x0), round(window.height * y0),
+                round(window.width * (x1 - x0)), round(window.height * (y1 - y0)),
+            )
+        surface.fill(theme.BACKGROUND)
+        self._on_scroll = False
+        area = pygame.Rect(0, 110, 760, window.height - 160)
+        area.centerx = window.centerx
+        return area
+
+    def _col(self, area: pygame.Rect, width: int) -> pygame.Rect:
+        col = pygame.Rect(0, area.y, min(width, area.width), area.height)
+        col.centerx = area.centerx
+        return col
+
+    def _draw_status(self, surface: pygame.Surface, area: pygame.Rect) -> None:
         """Línea de estado. Si es un error/rechazo, va en una barra resaltada
         (rojo) para que el motivo no pase desapercibido."""
         if self.status_error:
-            label = self.font.render(self.status, True, (255, 235, 230))
-            box = label.get_rect(center=(window.centerx, window.bottom - 40))
-            box.inflate_ip(40, 16)
+            label = self.small_font.render(self.status, True, (255, 235, 230))
+            box = label.get_rect(midbottom=(area.centerx, area.bottom))
+            box.inflate_ip(36, 14)
             pygame.draw.rect(surface, (150, 50, 45), box, border_radius=8)
             pygame.draw.rect(surface, (210, 90, 80), box, width=2, border_radius=8)
             surface.blit(label, label.get_rect(center=box.center))
         else:
-            label = self.small_font.render(self.status, True, theme.TEXT_DIM)
-            surface.blit(label, label.get_rect(center=(window.centerx, window.bottom - 30)))
+            color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+            label = self.small_font.render(self.status, True, color)
+            surface.blit(label, label.get_rect(midbottom=(area.centerx, area.bottom - 2)))
 
     def _draw_browser(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = self._field(surface, "player", "Tu nombre", self.f_player, area, area.y)
-        y += 6
-        caption = self.small_font.render("Servidores guardados", True, theme.TEXT_DIM)
-        surface.blit(caption, (area.x + 40, y))
-        y += 26
+        col = self._col(area, 540)
+        y = self._field(surface, "player", "Tu nombre", self.f_player, col, col.y + 4)
+        y += 4
+        cap_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        caption = self.small_font.render("Servidores guardados", True, cap_color)
+        surface.blit(caption, (col.x + 20, y))
+        y += 24
         if not self.servers:
-            empty = self.small_font.render("(ninguno — agregá uno)", True, theme.TEXT_DIM)
-            surface.blit(empty, (area.x + 50, y))
-            y += 30
+            empty = self.small_font.render("(ninguno — agregá uno)", True, cap_color)
+            surface.blit(empty, (col.x + 30, y))
+            y += 28
         for i, s in enumerate(self.servers):
-            rect = pygame.Rect(area.x + 40, y, area.width - 80, 34)
-            selected = i == self.selected
-            pygame.draw.rect(surface, (60, 66, 74) if selected else (40, 44, 50), rect, border_radius=6)
             label = f"{s.get('name', '')}   {s.get('host', '')}:{s.get('port', '')}"
-            surface.blit(self.font.render(label, True, theme.TEXT), (rect.x + 10, rect.y + 4))
-            self._rows[i] = rect
-            y += 40
-        y += 8
-        y = self._button(surface, "connect", "Conectar", area, y)
-        y = self._button(surface, "add", "Agregar", area, y, option=True)
+            y = self._list_row(surface, col, y, label, i == self.selected, i, self._rows)
+        y += 6
+        y = self._button(surface, "connect", "Conectar", col, y, bordered=True)
+        y = self._button(surface, "add", "Agregar", col, y, option=True)
         if self.servers:
-            y = self._button(surface, "edit", "Editar", area, y, option=True)
-            y = self._button(surface, "delete", "Borrar", area, y, option=True)
-        self._button(surface, "back", "Volver (ESC)", area, y + 6, option=True)
+            y = self._button(surface, "edit", "Editar", col, y, option=True)
+            y = self._button(surface, "delete", "Borrar", col, y, option=True)
+        self._button(surface, "back", "Volver (ESC)", col, y + 4, option=True)
 
     def _draw_form(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 6
+        col = self._col(area, 520)
+        y = col.y + 6
         head = "Editar servidor" if self._edit_index is not None else "Nuevo servidor"
-        label = self.font.render(head, True, theme.SELECTION)
-        surface.blit(label, label.get_rect(midtop=(area.centerx, y)))
-        y += 50
-        y = self._field(surface, "sname", "Nombre (opcional)", self.f_sname, area, y)
-        y = self._field(surface, "shost", "Dirección (IP o dominio)", self.f_shost, area, y)
-        y = self._field(surface, "sport", "Puerto", self.f_sport, area, y)
-        y = self._button(surface, "save_form", "Guardar", area, y + 8)
-        self._button(surface, "cancel_form", "Cancelar", area, y, option=True)
+        label = self.font.render(head, True, INK if self._on_scroll else theme.SELECTION)
+        surface.blit(label, label.get_rect(midtop=(col.centerx, y)))
+        y += 46
+        y = self._field(surface, "sname", "Nombre (opcional)", self.f_sname, col, y)
+        y = self._field(surface, "shost", "Dirección (IP o dominio)", self.f_shost, col, y)
+        y = self._field(surface, "sport", "Puerto", self.f_sport, col, y)
+        y = self._button(surface, "save_form", "Guardar", col, y + 6, bordered=True)
+        self._button(surface, "cancel_form", "Cancelar", col, y, option=True)
 
     def _draw_lobby(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 6
         name = self.session.server_name if self.session is not None else ""
-        head = self.font.render(f"Lobby — {name}" if name else "Conectando…", True, theme.SELECTION)
-        surface.blit(head, head.get_rect(midtop=(area.centerx, y)))
-        y += 42
-        # Jugadores conectados (línea compacta).
+        head = self.font.render(
+            f"Lobby — {name}" if name else "Conectando…",
+            True, INK if self._on_scroll else theme.SELECTION,
+        )
+        surface.blit(head, head.get_rect(midtop=(area.centerx, area.y)))
+        body = pygame.Rect(area.x, area.y + 40, area.width, area.height - 40)
+        left, right = self._split_for_chat(body)
+        # --- izquierda: jugadores + catálogo + acciones ---
+        cap_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        row_color = INK if self._on_scroll else theme.TEXT
+        y = left.y + 2
         players = self.session.players if self.session is not None else []
         nicks = ", ".join(p[1] for p in players) or "(esperando…)"
-        line = self.small_font.render(f"Conectados: {nicks}", True, theme.TEXT_DIM)
-        surface.blit(line, (area.x + 30, y))
-        y += 30
-        # Catálogo de partidas.
-        cap = self.small_font.render("Partidas disponibles", True, theme.TEXT_DIM)
-        surface.blit(cap, (area.x + 30, y))
-        y += 26
+        surface.blit(self.small_font.render(f"Conectados: {nicks}", True, cap_color), (left.x + 10, y))
+        y += 28
+        surface.blit(self.small_font.render("Partidas disponibles", True, cap_color), (left.x + 10, y))
+        y += 24
         matches = self.session.matches if self.session is not None else []
         if not matches:
-            empty = self.small_font.render("(ninguna — creá una)", True, theme.TEXT_DIM)
-            surface.blit(empty, (area.x + 40, y))
-            y += 30
+            surface.blit(self.small_font.render("(ninguna — creá una)", True, cap_color), (left.x + 20, y))
+            y += 28
         for row in matches:
             mid, mname, maxp, occ, estado, mapa = row[0], row[1], row[2], row[3], row[4], row[5]
-            rect = pygame.Rect(area.x + 30, y, area.width - 60, 32)
-            selected = mid == self.selected_match
-            pygame.draw.rect(surface, (60, 66, 74) if selected else (40, 44, 50), rect, border_radius=6)
-            label = f"{mname}    {occ}/{maxp}    {estado}    {mapa}"
-            surface.blit(self.small_font.render(label, True, theme.TEXT), (rect.x + 10, rect.y + 6))
-            self._match_rows[mid] = rect
-            y += 38
-        y += 6
-        y = self._button(surface, "open_create", "Crear partida", area, y, option=True)
+            label = f"{mname}   {occ}/{maxp}   {estado}   {mapa}"
+            y = self._list_row(surface, left, y, label, mid == self.selected_match, mid, self._match_rows)
+        y += 4
+        y = self._button(surface, "open_create", "Crear partida", left, y, option=True)
         if self.selected_match is not None:
-            y = self._button(surface, "join", "Unirse a la seleccionada", area, y, option=True)
-        # Chat global.
-        cap2 = self.small_font.render("Chat", True, theme.TEXT_DIM)
-        surface.blit(cap2, (area.x + 30, y + 4))
-        y += 28
-        for who, text in self.chat_log[-5:]:
-            chat_line = self.small_font.render(f"{who}: {text}", True, theme.TEXT)
-            surface.blit(chat_line, (area.x + 40, y))
-            y += 22
-        y = self._field(surface, "chat", "Mensaje (Enter envía)", self.f_chat, area, y + 2)
-        self._button(surface, "disconnect", "Desconectar", area, y, option=True)
+            y = self._button(surface, "join", "Unirse a la seleccionada", left, y, option=True)
+        self._button(surface, "disconnect", "Desconectar", left, y, option=True)
+        # --- derecha: chat global ---
+        if right is not None:
+            self._draw_chat_panel(surface, right, "Chat", self.chat_log)
 
     def _draw_createform(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 6
-        head = self.font.render("Crear partida", True, theme.SELECTION)
-        surface.blit(head, head.get_rect(midtop=(area.centerx, y)))
-        y += 50
-        y = self._field(surface, "mname", "Nombre de la partida", self.f_mname, area, y)
-        y = self._button(surface, "cmplayers", f"Jugadores:  {self.create_players}", area, y, option=True)
+        col = self._col(area, 520)
+        y = col.y + 6
+        head = self.font.render("Crear partida", True, INK if self._on_scroll else theme.SELECTION)
+        surface.blit(head, head.get_rect(midtop=(col.centerx, y)))
+        y += 46
+        y = self._field(surface, "mname", "Nombre de la partida", self.f_mname, col, y)
+        y = self._button(surface, "cmplayers", f"Jugadores:  {self.create_players}", col, y, option=True)
         w, h, _f, _t = MAP_SIZES[self.create_size]
-        y = self._button(surface, "cmsize", f"Mapa:  {self.create_size} ({w}x{h})", area, y, option=True)
-        y = self._field(surface, "mmaxturns", "Turnos máximos", self.f_mmaxturns, area, y)
-        y = self._field(surface, "mturnsecs", "Segundos por turno (0 = sin límite)", self.f_mturnsecs, area, y)
-        y = self._button(surface, "create_do", "Crear", area, y + 8)
-        self._button(surface, "cancel_create", "Cancelar", area, y, option=True)
+        y = self._button(surface, "cmsize", f"Mapa:  {self.create_size} ({w}x{h})", col, y, option=True)
+        y = self._field(surface, "mmaxturns", "Turnos máximos", self.f_mmaxturns, col, y)
+        y = self._field(surface, "mturnsecs", "Segundos por turno (0 = sin límite)", self.f_mturnsecs, col, y)
+        y = self._button(surface, "create_do", "Crear", col, y + 6, bordered=True)
+        self._button(surface, "cancel_create", "Cancelar", col, y, option=True)
 
     def _draw_room(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 10
-        head = self.font.render("Sala de espera", True, theme.SELECTION)
-        surface.blit(head, head.get_rect(midtop=(area.centerx, y)))
-        y += 50
-        info = next((r for r in (self.session.matches if self.session else []) if r[0] == self.match_id), None)
+        head = self.font.render(
+            "Sala de espera", True, INK if self._on_scroll else theme.SELECTION
+        )
+        surface.blit(head, head.get_rect(midtop=(area.centerx, area.y)))
+        body = pygame.Rect(area.x, area.y + 40, area.width, area.height - 40)
+        left, right = self._split_for_chat(body)
+        cap_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        text_color = INK if self._on_scroll else theme.TEXT
+        y = left.y + 2
+        info = next(
+            (r for r in (self.session.matches if self.session else []) if r[0] == self.match_id),
+            None,
+        )
         if info is not None:
             line = f"{info[1]} — {info[3]}/{info[2]} jugadores — {info[4]}"
-            surface.blit(self.font.render(line, True, theme.TEXT), (area.x + 40, y))
-            y += 40
+            surface.blit(self.small_font.render(line, True, text_color), (left.x + 10, y))
+            y += 30
         seat_txt = f"Tu asiento: J{(self.seat or 0) + 1}"
-        surface.blit(self.small_font.render(seat_txt, True, theme.TEXT_DIM), (area.x + 40, y))
-        y += 30
-        wait = "Esperando a que se sumen y todos estén listos…" if not self.local_ready else "Listo. Esperando al resto…"
-        surface.blit(self.small_font.render(wait, True, theme.TEXT_DIM), (area.x + 40, y))
+        surface.blit(self.small_font.render(seat_txt, True, cap_color), (left.x + 10, y))
+        y += 28
+        wait = (
+            "Esperando a que se sumen y todos estén listos…"
+            if not self.local_ready else "Listo. Esperando al resto…"
+        )
+        surface.blit(self.small_font.render(wait, True, cap_color), (left.x + 10, y))
         y += 34
-        y = self._button(surface, "ready", "Cancelar listo" if self.local_ready else "¡Listo!", area, y)
-        y = self._button(surface, "leaveroom", "Salir de la sala", area, y, option=True)
-        # Chat de la sala (entre quienes se sumaron, hasta arrancar).
-        cap = self.small_font.render("Chat de la sala", True, theme.TEXT_DIM)
-        surface.blit(cap, (area.x + 40, y + 6))
-        y += 30
-        for who, text in self.room_chat_log[-5:]:
-            chat_line = self.small_font.render(f"{who}: {text}", True, theme.TEXT)
-            surface.blit(chat_line, (area.x + 50, y))
-            y += 22
-        self._field(surface, "chat", "Mensaje (Enter envía)", self.f_chat, area, y + 2)
+        y = self._button(
+            surface, "ready", "Cancelar listo" if self.local_ready else "¡Listo!",
+            left, y, bordered=True,
+        )
+        self._button(surface, "leaveroom", "Salir de la sala", left, y, option=True)
+        if right is not None:
+            self._draw_chat_panel(surface, right, "Chat de la sala", self.room_chat_log)
 
     # --- helpers de dibujo ----------------------------------------------
 
-    def _button(self, surface, bid, label, area, y, option: bool = False) -> int:
-        rect = pygame.Rect(0, 0, 460 if option else 380, 40 if option else 48)
+    def _split_for_chat(self, body: pygame.Rect) -> tuple[pygame.Rect, pygame.Rect | None]:
+        """Parte el cuerpo en columna izquierda (contenido) + derecha (chat).
+        Sin sesión viva no hay chat: una sola columna centrada."""
+        if self.session is None:
+            return self._col(body, 560), None
+        gap = 30
+        left = pygame.Rect(body.x, body.y, int(body.width * 0.55), body.height)
+        right = pygame.Rect(
+            left.right + gap, body.y, body.right - (left.right + gap), body.height
+        )
+        return left, right
+
+    def _draw_chat_panel(
+        self, surface: pygame.Surface, area: pygame.Rect, title: str,
+        log: list[tuple[str, str]],
+    ) -> None:
+        head = self.small_font.render(
+            title, True, INK if self._on_scroll else theme.TEXT
+        )
+        surface.blit(head, (area.x, area.y))
+        input_h, reserve = 50, 26
+        box = pygame.Rect(
+            area.x, area.y + 26, area.width, area.height - 26 - reserve - input_h - 4
+        )
+        if self._on_scroll:
+            overlay = pygame.Surface(box.size, pygame.SRCALPHA)
+            overlay.fill((255, 250, 235, 55))
+            surface.blit(overlay, box.topleft)
+            pygame.draw.rect(surface, INK, box, width=2, border_radius=6)
+            line_color, dim_color = INK, INK_DIM
+        else:
+            pygame.draw.rect(surface, (24, 28, 34), box, border_radius=6)
+            pygame.draw.rect(surface, (90, 96, 104), box, width=2, border_radius=6)
+            line_color, dim_color = theme.TEXT, theme.TEXT_DIM
+        lines = self._chat_lines(log, box.width - 16)
+        if not lines:
+            hint = self.small_font.render("Sin mensajes todavía…", True, dim_color)
+            surface.blit(hint, (box.x + 8, box.y + 8))
+        else:
+            line_h = 22
+            max_lines = max(1, (box.height - 12) // line_h)
+            ty = box.y + 8
+            for ln in lines[-max_lines:]:
+                surface.blit(self.small_font.render(ln, True, line_color), (box.x + 8, ty))
+                ty += line_h
+        field_area = pygame.Rect(box.x - 20, box.bottom + 2, box.width + 40, input_h)
+        self._field(surface, "chat", "Mensaje (Enter envía)", self.f_chat, field_area, field_area.y)
+
+    def _chat_lines(self, log: list[tuple[str, str]], max_width: int) -> list[str]:
+        """Aplana el log en líneas ajustadas al ancho del panel."""
+        lines: list[str] = []
+        for name, text in log:
+            cur = ""
+            for word in f"{name}: {text}".split():
+                probe = f"{cur} {word}".strip()
+                if self.small_font.size(probe)[0] > max_width and cur:
+                    lines.append(cur)
+                    cur = word
+                else:
+                    cur = probe
+            if cur:
+                lines.append(cur)
+        return lines
+
+    def _list_row(
+        self, surface, area, y, label, selected: bool, key, store, height: int = 32
+    ) -> int:
+        """Fila seleccionable (servidor o partida) en estilo pergamino."""
+        rect = pygame.Rect(area.x + 10, y, area.width - 20, height)
+        if self._on_scroll:
+            overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
+            overlay.fill((90, 55, 20, 70 if selected else 28))
+            surface.blit(overlay, rect.topleft)
+            if selected:
+                pygame.draw.rect(surface, INK, rect, width=2, border_radius=6)
+            text_color = INK
+        else:
+            pygame.draw.rect(
+                surface, (60, 66, 74) if selected else (40, 44, 50), rect, border_radius=6
+            )
+            text_color = theme.TEXT
+        surface.blit(
+            self.small_font.render(label, True, text_color),
+            (rect.x + 10, rect.y + (height - 22) // 2),
+        )
+        store[key] = rect
+        return rect.bottom + 6
+
+    def _button(
+        self, surface, bid, label, area, y, option: bool = False, bordered: bool = False
+    ) -> int:
+        """Botón en estilo "tinta" sobre el pergamino (acciones con marco;
+        opciones como filas de texto). Degrada a relleno sin el pergamino."""
+        if option:
+            rect = pygame.Rect(0, 0, area.width - 8, 36)
+        else:
+            rect = pygame.Rect(0, 0, min(360, area.width - 8), 46)
         rect.centerx = area.centerx
         rect.y = y
         over = rect.collidepoint(scale.mouse_pos())
-        if option:
-            bg = (70, 78, 86) if over else (50, 56, 62)
+        font = self.small_font if option else self.font
+        if self._on_scroll:
+            if bordered:
+                if over:
+                    highlight = pygame.Surface(rect.size, pygame.SRCALPHA)
+                    highlight.fill((90, 55, 20, 35))
+                    surface.blit(highlight, rect.topleft)
+                pygame.draw.rect(
+                    surface, INK_HOVER if over else INK, rect, width=2, border_radius=8
+                )
+            elif over:
+                highlight = pygame.Surface(rect.size, pygame.SRCALPHA)
+                highlight.fill((90, 55, 20, 45))
+                surface.blit(highlight, rect.topleft)
+            text = font.render(label, True, INK_HOVER if over else INK)
         else:
-            bg = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
-        pygame.draw.rect(surface, bg, rect, border_radius=8)
-        text = self.font.render(label, True, theme.TEXT)
+            if bordered:
+                color = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
+                pygame.draw.rect(surface, color, rect, width=2, border_radius=8)
+            elif option:
+                pygame.draw.rect(
+                    surface, (70, 78, 86) if over else (50, 56, 62), rect, border_radius=8
+                )
+            else:
+                bg = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
+                pygame.draw.rect(surface, bg, rect, border_radius=8)
+            text = font.render(label, True, theme.TEXT)
         surface.blit(text, text.get_rect(center=rect.center))
         self._buttons[bid] = rect
-        return rect.bottom + 12
+        return rect.bottom + (8 if self._on_scroll else 12)
 
     def _field(self, surface, fid, label, field: TextField, area, y) -> int:
-        caption = self.small_font.render(label, True, theme.TEXT_DIM)
-        surface.blit(caption, (area.x + 40, y))
-        rect = pygame.Rect(area.x + 40, y + 20, area.width - 80, 34)
+        pad = 20
+        cap_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        caption = self.small_font.render(label, True, cap_color)
+        surface.blit(caption, (area.x + pad, y))
+        rect = pygame.Rect(area.x + pad, y + 20, area.width - 2 * pad, 30)
         focused = self.focused == fid
-        pygame.draw.rect(surface, (30, 34, 40), rect, border_radius=6)
-        pygame.draw.rect(surface, theme.TEXT if focused else (90, 96, 104), rect, width=2, border_radius=6)
+        if self._on_scroll:
+            overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
+            overlay.fill((255, 250, 235, 70))
+            surface.blit(overlay, rect.topleft)
+            pygame.draw.rect(
+                surface, INK_HOVER if focused else INK, rect, width=2, border_radius=6
+            )
+            txt_color = INK
+        else:
+            pygame.draw.rect(surface, (30, 34, 40), rect, border_radius=6)
+            pygame.draw.rect(
+                surface, theme.TEXT if focused else (90, 96, 104), rect, width=2, border_radius=6
+            )
+            txt_color = theme.TEXT
         shown = field.value + ("_" if focused else "")
-        surface.blit(self.font.render(shown, True, theme.TEXT), (rect.x + 10, rect.y + 4))
+        surface.blit(self.font.render(shown, True, txt_color), (rect.x + 10, rect.y + 3))
         self._fields[fid] = rect
-        return rect.bottom + 14
+        return rect.bottom + 10

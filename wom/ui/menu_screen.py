@@ -387,7 +387,12 @@ class MenuScreen:
             y = self._button(surface, bid, label, area, y)
 
     def _draw_new(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 6
+        y = area.y + 4
+        heading = self.small_font.render(
+            "CONFIGURACIÓN DE PARTIDA", True, INK if self._on_scroll else theme.TEXT
+        )
+        surface.blit(heading, heading.get_rect(midtop=(area.centerx, y)))
+        y += 26
         width, height, forts, towns = MAP_SIZES[self.map_size]
         if self.map_source == "archivo":
             name = self.loaded_map_path.stem if self.loaded_map_path else "(elegir)"
@@ -407,16 +412,19 @@ class MenuScreen:
         hint_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
         hint = self.small_font.render("(click para cambiar cada opción)", True, hint_color)
         surface.blit(hint, hint.get_rect(center=(area.centerx, y + 6)))
-        y += 30
+        # Separa la configuración de la acción de comienzo.
+        y = self._divider(surface, area, y + 26)
+        y += 12
         can_start = self.map_source == "aleatorio" or self.loaded_map_path is not None
         if can_start:
-            y = self._button(surface, "start", "Comenzar", area, y)
+            y = self._button(surface, "start", "Comenzar", area, y, bordered=True)
         else:
             warn = self.small_font.render(
                 "Elegí un archivo para comenzar", True, INK_HOVER if self._on_scroll else theme.TEXT_DIM
             )
             surface.blit(warn, warn.get_rect(center=(area.centerx, y + 18)))
             y += 42
+        y += 4
         self._button(surface, "back", "Volver (ESC)", area, y, option_style=True)
 
     def _cycle_opponents(self) -> None:
@@ -566,6 +574,18 @@ class MenuScreen:
             )
         self._button(surface, "back", "Volver (ESC)", area, y + 8)
 
+    def _divider(self, surface: pygame.Surface, area: pygame.Rect, y: int) -> int:
+        """Línea horizontal de separación (tinta translúcida sobre el pergamino).
+        Devuelve el y siguiente."""
+        x0, x1 = area.x + 20, area.right - 20
+        if self._on_scroll:
+            line = pygame.Surface((max(1, x1 - x0), 2), pygame.SRCALPHA)
+            line.fill((*INK, 120))
+            surface.blit(line, (x0, y))
+        else:
+            pygame.draw.line(surface, theme.TEXT_DIM, (x0, y), (x1, y), 1)
+        return y + 2
+
     def _button(
         self,
         surface: pygame.Surface,
@@ -574,33 +594,50 @@ class MenuScreen:
         area: pygame.Rect,
         y: int,
         option_style: bool = False,
+        bordered: bool = False,
     ) -> int:
         """Dibuja un botón centrado en el área, lo registra para hit-testing;
         devuelve el y siguiente. Sobre el pergamino el estilo es de "tinta"
-        (texto oscuro, realce translúcido al pasar el mouse)."""
+        (texto oscuro, realce translúcido al pasar el mouse). Con `bordered` el
+        botón lleva un marco de tinta (sin relleno) para destacar la acción
+        principal, aprovechando el color que ya aporta el pergamino."""
         rect = pygame.Rect(0, 0, *BUTTON_SIZE)
         if option_style:
             rect.width = 520
             rect.height = 40
         if self._on_scroll:
-            rect.width = area.width - 8
+            # Los botones con borde van más angostos (80%) para que el marco no
+            # se pegue a los bordes del pergamino.
+            rect.width = round((area.width - 8) * (0.8 if bordered else 1.0))
             rect.height = 34 if option_style else 42
         rect.centerx = area.centerx
         rect.y = y
         over = rect.collidepoint(scale.mouse_pos())
         font = self.small_font if (option_style and self._on_scroll) else self.font
         if self._on_scroll:
-            if over:
+            if bordered:
+                if over:
+                    highlight = pygame.Surface(rect.size, pygame.SRCALPHA)
+                    highlight.fill((90, 55, 20, 35))
+                    surface.blit(highlight, rect.topleft)
+                pygame.draw.rect(
+                    surface, INK_HOVER if over else INK, rect, width=2, border_radius=8
+                )
+            elif over:
                 highlight = pygame.Surface(rect.size, pygame.SRCALPHA)
                 highlight.fill((90, 55, 20, 45))
                 surface.blit(highlight, rect.topleft)
             text = font.render(label, True, INK_HOVER if over else INK)
         else:
-            if option_style:
-                bg = (50, 56, 62) if not over else (70, 78, 86)
+            if bordered:
+                color = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
+                pygame.draw.rect(surface, color, rect, width=2, border_radius=8)
             else:
-                bg = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
-            pygame.draw.rect(surface, bg, rect, border_radius=8)
+                if option_style:
+                    bg = (50, 56, 62) if not over else (70, 78, 86)
+                else:
+                    bg = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
+                pygame.draw.rect(surface, bg, rect, border_radius=8)
             text = font.render(label, True, theme.TEXT)
         surface.blit(text, text.get_rect(center=rect.center))
         self._buttons[bid] = rect

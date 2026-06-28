@@ -31,6 +31,7 @@ from wom.core.worldmap import MAX_PLAYERS
 from wom.net.protocol import GameSetup
 from wom.net.rules import MatchRules
 from wom.net.session import (
+    ChatReceived,
     ClientSession,
     Connected,
     Disconnected,
@@ -42,9 +43,26 @@ from wom.net.session import (
 )
 from wom.net.transport import DEFAULT_PORT, Server, connect
 from wom.ui import scale, theme
-from wom.ui.menu_screen import MAP_SIZES, VICTORY_LABELS, VICTORY_MODES, _next
+from wom.ui.assets import ASSETS_DIR
+from wom.ui.menu_screen import (
+    INK,
+    INK_DIM,
+    INK_HOVER,
+    MAP_SIZES,
+    VICTORY_LABELS,
+    VICTORY_MODES,
+    _next,
+)
 
 CONNECT_TIMEOUT = 4.0
+
+# Fondo de las pantallas secundarias: portada con un pergamino ancho a la
+# derecha (data/assets/title-secondary.png). Zona útil del pergamino como
+# fracciones del ancho/alto de la imagen (x0, y0, x1, y1). Si falta el asset, la
+# pantalla cae al fondo plano de siempre.
+TITLE_IMAGE_WIDE = "title-secondary.png"
+SCROLL_AREA_WIDE = (0.41, 0.155, 0.90, 0.66)
+MAX_CHAT_LINES = 60
 
 
 @dataclass
@@ -87,12 +105,18 @@ class MultiplayerScreen:
         self.wants_internet = False  # el hub pide abrir el navegador de servidores
         self.net_start: NetGameStart | None = None
 
-        self.title_font = pygame.font.SysFont(None, 64)
+        self.title_font = pygame.font.SysFont(None, 48)
         self.font = pygame.font.SysFont(None, 30)
         self.small_font = pygame.font.SysFont(None, 22)
         self._buttons: dict[str, pygame.Rect] = {}
         self._fields: dict[str, pygame.Rect] = {}
         self.focused: str | None = None
+
+        # Fondo "pergamino ancho" (cacheado al tamaño de la ventana).
+        path = ASSETS_DIR / TITLE_IMAGE_WIDE
+        self.background = pygame.image.load(str(path)) if path.exists() else None
+        self._scaled_bg: pygame.Surface | None = None
+        self._on_scroll = False  # True si se dibuja sobre el pergamino
 
         # Campos de texto.
         self.f_name = TextField(default_name)
@@ -101,6 +125,8 @@ class MultiplayerScreen:
         self.f_hostport = TextField(str(DEFAULT_PORT), numeric=True, max_len=5)
         self.f_ip = TextField("127.0.0.1")
         self.f_connectport = TextField(str(DEFAULT_PORT), numeric=True, max_len=5)
+        self.f_chat = TextField("", max_len=120)  # chat de la sala de espera
+        self.chat_log: list[tuple[str, str]] = []  # (nombre, texto)
 
         # Reglas cíclicas (host).
         self.victory_mode = VictoryMode.TOTAL
@@ -130,6 +156,7 @@ class MultiplayerScreen:
             "hostport": self.f_hostport,
             "ip": self.f_ip,
             "connectport": self.f_connectport,
+            "chat": self.f_chat,
         }
 
     # --- red (llamado una vez por frame desde el loop) ---------------------
@@ -192,8 +219,24 @@ class MultiplayerScreen:
         elif isinstance(event, Disconnected):
             self.status = f"Desconectado: {event.reason}"
             self._teardown()
+        elif isinstance(event, ChatReceived):
+            self._push_chat(event.name, event.text)
         elif isinstance(event, Started):
             self._begin_game()
+
+    def _push_chat(self, name: str, text: str) -> None:
+        self.chat_log.append((name, text))
+        del self.chat_log[:-MAX_CHAT_LINES]
+
+    def _send_chat(self) -> None:
+        """Envía el texto del campo de chat de la sala y lo refleja localmente
+        (el relay del host no devuelve el eco al emisor)."""
+        text = self.f_chat.value.strip()
+        self.f_chat.value = ""
+        if not text or self.session is None:
+            return
+        self._push_chat(self.f_name.value or "yo", text)
+        self.session.send_chat(text)
 
     def _begin_game(self) -> None:
         if self.role == "host":
@@ -238,6 +281,9 @@ class MultiplayerScreen:
             self._click(event.pos)
 
     def _field_key(self, event: pygame.event.Event) -> None:
+        if self.focused == "chat" and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self._send_chat()  # Enter envía y conserva el foco para seguir charlando
+            return
         if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE, pygame.K_TAB):
             self.focused = None
             return
@@ -338,12 +384,12 @@ class MultiplayerScreen:
     def draw(self, surface: pygame.Surface) -> None:
         self._buttons.clear()
         self._fields.clear()
-        surface.fill(theme.BACKGROUND)
         window = surface.get_rect()
-        title = self.title_font.render("Multijugador", True, theme.TEXT)
-        surface.blit(title, title.get_rect(center=(window.centerx, 70)))
-        area = pygame.Rect(0, 140, 600, window.height - 200)
-        area.centerx = window.centerx
+        area = self._paint_background(surface, window)
+        head_color = INK if self._on_scroll else theme.TEXT
+        title = self.title_font.render("Multijugador", True, head_color)
+        surface.blit(title, title.get_rect(midtop=(area.centerx, area.y)))
+        content = pygame.Rect(area.x, area.y + 52, area.width, area.height - 52)
         draw = {
             "hub": self._draw_hub,
             "create": self._draw_create,
@@ -351,77 +397,179 @@ class MultiplayerScreen:
             "waiting": self._draw_waiting,
             "started": self._draw_waiting,
         }[self.mode]
-        draw(surface, area)
+        draw(surface, content)
         if self.status:
-            self._status_line(surface, window)
+            self._status_line(surface, content)
 
-    def _status_line(self, surface: pygame.Surface, window: pygame.Rect) -> None:
-        label = self.small_font.render(self.status, True, theme.TEXT_DIM)
-        surface.blit(label, label.get_rect(center=(window.centerx, window.bottom - 40)))
+    def _paint_background(self, surface: pygame.Surface, window: pygame.Rect) -> pygame.Rect:
+        """Pinta el fondo y devuelve el área útil del pergamino (ancho).
+        Si falta el asset, cae al fondo plano centrado de siempre."""
+        if self.background is not None:
+            if self._scaled_bg is None or self._scaled_bg.get_size() != window.size:
+                self._scaled_bg = pygame.transform.smoothscale(self.background, window.size)
+            surface.blit(self._scaled_bg, (0, 0))
+            x0, y0, x1, y1 = SCROLL_AREA_WIDE
+            self._on_scroll = True
+            return pygame.Rect(
+                round(window.width * x0), round(window.height * y0),
+                round(window.width * (x1 - x0)), round(window.height * (y1 - y0)),
+            )
+        surface.fill(theme.BACKGROUND)
+        self._on_scroll = False
+        area = pygame.Rect(0, 120, 640, window.height - 180)
+        area.centerx = window.centerx
+        return area
+
+    def _col(self, area: pygame.Rect, width: int) -> pygame.Rect:
+        """Columna centrada dentro del área ancha (para formularios)."""
+        col = pygame.Rect(0, area.y, min(width, area.width), area.height)
+        col.centerx = area.centerx
+        return col
+
+    def _status_line(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        label = self.small_font.render(self.status, True, color)
+        surface.blit(label, label.get_rect(midbottom=(area.centerx, area.bottom - 2)))
 
     def _draw_hub(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 10
-        cap = self.small_font.render("Red local (LAN / IP directa)", True, theme.TEXT_DIM)
-        surface.blit(cap, (area.x + 40, y))
+        col = self._col(area, 460)
+        cap_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        y = col.y + 8
+        cap = self.small_font.render("Red local (LAN / IP directa)", True, cap_color)
+        surface.blit(cap, cap.get_rect(midtop=(col.centerx, y)))
         y += 26
-        y = self._button(surface, "to_create", "Crear partida", area, y)
-        y = self._button(surface, "to_connect", "Conectarse", area, y)
-        cap2 = self.small_font.render("Internet (servidor dedicado)", True, theme.TEXT_DIM)
-        surface.blit(cap2, (area.x + 40, y + 6))
-        y = self._button(surface, "to_internet", "Jugar por Internet", area, y + 32)
-        self._button(surface, "back", "Volver (ESC)", area, y + 10)
+        y = self._button(surface, "to_create", "Crear partida", col, y, bordered=True)
+        y = self._button(surface, "to_connect", "Conectarse", col, y, bordered=True)
+        cap2 = self.small_font.render("Internet (servidor dedicado)", True, cap_color)
+        surface.blit(cap2, cap2.get_rect(midtop=(col.centerx, y + 10)))
+        y = self._button(surface, "to_internet", "Jugar por Internet", col, y + 36, bordered=True)
+        self._button(surface, "back", "Volver (ESC)", col, y + 8)
 
     def _draw_create(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 6
-        y = self._field(surface, "name", "Tu nombre", self.f_name, area, y)
+        col = self._col(area, 480)
+        y = col.y + 4
+        y = self._field(surface, "name", "Tu nombre", self.f_name, col, y)
         width, height, _f, _t = MAP_SIZES[self.map_size]
         y = self._button(
-            surface, "n_players", f"Jugadores:  {self.n_players}", area, y, option=True,
+            surface, "n_players", f"Jugadores:  {self.n_players}", col, y, option=True,
         )
         y = self._button(
             surface, "victory",
-            f"Victoria:  {VICTORY_LABELS[self.victory_mode]}", area, y, option=True,
+            f"Victoria:  {VICTORY_LABELS[self.victory_mode]}", col, y, option=True,
         )
         y = self._button(
             surface, "map_size", f"Mapa:  {self.map_size} ({width}x{height})",
-            area, y, option=True,
+            col, y, option=True,
         )
-        y = self._field(surface, "maxturns", "Turnos máximos", self.f_maxturns, area, y)
+        y = self._field(surface, "maxturns", "Turnos máximos", self.f_maxturns, col, y)
         y = self._field(
             surface, "turnsecs", "Segundos por turno (0 = sin límite)",
-            self.f_turnsecs, area, y,
+            self.f_turnsecs, col, y,
         )
-        y = self._field(surface, "hostport", "Puerto", self.f_hostport, area, y)
-        y = self._button(surface, "host_start", "Esperar conexiones", area, y + 8)
-        self._button(surface, "back", "Volver (ESC)", area, y, option=True)
+        y = self._field(surface, "hostport", "Puerto", self.f_hostport, col, y)
+        y = self._button(surface, "host_start", "Esperar conexiones", col, y + 6, bordered=True)
+        self._button(surface, "back", "Volver (ESC)", col, y)
 
     def _draw_connect(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 16
-        y = self._field(surface, "name", "Tu nombre", self.f_name, area, y)
-        y = self._field(surface, "ip", "IP del host", self.f_ip, area, y)
-        y = self._field(surface, "connectport", "Puerto", self.f_connectport, area, y)
-        y = self._button(surface, "connect_start", "Conectar", area, y + 8)
-        self._button(surface, "back", "Volver (ESC)", area, y, option=True)
+        col = self._col(area, 480)
+        y = col.y + 14
+        y = self._field(surface, "name", "Tu nombre", self.f_name, col, y)
+        y = self._field(surface, "ip", "IP del host", self.f_ip, col, y)
+        y = self._field(surface, "connectport", "Puerto", self.f_connectport, col, y)
+        y = self._button(surface, "connect_start", "Conectar", col, y + 8, bordered=True)
+        self._button(surface, "back", "Volver (ESC)", col, y)
 
     def _draw_waiting(self, surface: pygame.Surface, area: pygame.Rect) -> None:
-        y = area.y + 10
-        label = self.font.render("Sala de espera", True, theme.SELECTION)
-        surface.blit(label, label.get_rect(midtop=(area.centerx, y)))
-        y += 44
+        # El pergamino ancho permite dos columnas: la sala a la izquierda y el
+        # chat a la derecha (solo con sesión viva y sobre el pergamino).
+        chat_on = self._on_scroll and self.session is not None
+        if chat_on:
+            gap = 30
+            left = pygame.Rect(area.x, area.y, int(area.width * 0.44), area.height)
+            right = pygame.Rect(
+                left.right + gap, area.y, area.right - (left.right + gap), area.height
+            )
+        else:
+            left, right = self._col(area, 480), None
+        self._draw_roster(surface, left)
+        if right is not None:
+            self._draw_chat(surface, right)
+
+    def _draw_roster(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        y = area.y + 4
+        head = self.font.render(
+            "Sala de espera", True, INK if self._on_scroll else theme.SELECTION
+        )
+        surface.blit(head, head.get_rect(midtop=(area.centerx, y)))
+        y += 42
+        row_color = INK if self._on_scroll else theme.TEXT
         for row in self._roster_rows():
-            rendered = self.font.render(row, True, theme.TEXT)
+            rendered = self.small_font.render(row, True, row_color)
             surface.blit(rendered, rendered.get_rect(midtop=(area.centerx, y)))
-            y += 38
-        y += 10
+            y += 30
+        y += 12
         in_lobby = (
             self.session is not None and self.session.state is SessionState.LOBBY
         )
         if self.mode == "waiting" and in_lobby:
             ready = self.session.local_ready
             y = self._button(
-                surface, "ready", "Cancelar listo" if ready else "¡Listo!", area, y
+                surface, "ready", "Cancelar listo" if ready else "¡Listo!",
+                area, y, bordered=True,
             )
-        self._button(surface, "cancel", "Cancelar / Volver", area, y + 10)
+        self._button(surface, "cancel", "Cancelar / Volver", area, y + 8)
+
+    def _draw_chat(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        head = self.small_font.render(
+            "Chat de la sala", True, INK if self._on_scroll else theme.TEXT
+        )
+        surface.blit(head, (area.x, area.y))
+        input_h, reserve = 50, 26
+        box = pygame.Rect(
+            area.x, area.y + 26, area.width, area.height - 26 - reserve - input_h - 4
+        )
+        if self._on_scroll:
+            overlay = pygame.Surface(box.size, pygame.SRCALPHA)
+            overlay.fill((255, 250, 235, 55))
+            surface.blit(overlay, box.topleft)
+            pygame.draw.rect(surface, INK, box, width=2, border_radius=6)
+            line_color, dim_color = INK, INK_DIM
+        else:
+            pygame.draw.rect(surface, (24, 28, 34), box, border_radius=6)
+            pygame.draw.rect(surface, (90, 96, 104), box, width=2, border_radius=6)
+            line_color, dim_color = theme.TEXT, theme.TEXT_DIM
+        lines = self._chat_display_lines(box.width - 16)
+        if not lines:
+            hint = self.small_font.render("Sin mensajes todavía…", True, dim_color)
+            surface.blit(hint, (box.x + 8, box.y + 8))
+        else:
+            line_h = 22
+            max_lines = max(1, (box.height - 12) // line_h)
+            ty = box.y + 8
+            for ln in lines[-max_lines:]:
+                rendered = self.small_font.render(ln, True, line_color)
+                surface.blit(rendered, (box.x + 8, ty))
+                ty += line_h
+        field_area = pygame.Rect(box.x - 20, box.bottom + 2, box.width + 40, input_h)
+        self._field(
+            surface, "chat", "Mensaje (Enter envía)", self.f_chat, field_area, field_area.y
+        )
+
+    def _chat_display_lines(self, max_width: int) -> list[str]:
+        """Aplana el log de chat en líneas ajustadas al ancho del panel."""
+        lines: list[str] = []
+        for name, text in self.chat_log:
+            cur = ""
+            for word in f"{name}: {text}".split():
+                probe = f"{cur} {word}".strip()
+                if self.small_font.size(probe)[0] > max_width and cur:
+                    lines.append(cur)
+                    cur = word
+                else:
+                    cur = probe
+            if cur:
+                lines.append(cur)
+        return lines
 
     def _roster_rows(self) -> list[str]:
         """Filas de la sala: jugadores conectados (con su estado) + lugares
@@ -445,33 +593,73 @@ class MultiplayerScreen:
         return self.session is not None and pid == self.session.human_id
 
     def _button(
-        self, surface, bid, label, area, y, option: bool = False
+        self, surface, bid, label, area, y, option: bool = False, bordered: bool = False
     ) -> int:
-        rect = pygame.Rect(0, 0, 460 if option else 380, 40 if option else 48)
+        """Botón en estilo "tinta" sobre el pergamino: las opciones cíclicas son
+        filas de texto con realce al pasar el mouse; las acciones (`bordered`)
+        llevan marco de tinta para destacar. Degrada a botones rellenos sin el
+        fondo de pergamino."""
+        if option:
+            rect = pygame.Rect(0, 0, area.width - 8, 36)
+        else:
+            rect = pygame.Rect(0, 0, min(360, area.width - 8), 46)
         rect.centerx = area.centerx
         rect.y = y
         over = rect.collidepoint(scale.mouse_pos())
-        if option:
-            bg = (70, 78, 86) if over else (50, 56, 62)
+        font = self.small_font if option else self.font
+        if self._on_scroll:
+            if bordered:
+                if over:
+                    highlight = pygame.Surface(rect.size, pygame.SRCALPHA)
+                    highlight.fill((90, 55, 20, 35))
+                    surface.blit(highlight, rect.topleft)
+                pygame.draw.rect(
+                    surface, INK_HOVER if over else INK, rect, width=2, border_radius=8
+                )
+            elif over:
+                highlight = pygame.Surface(rect.size, pygame.SRCALPHA)
+                highlight.fill((90, 55, 20, 45))
+                surface.blit(highlight, rect.topleft)
+            text = font.render(label, True, INK_HOVER if over else INK)
         else:
-            bg = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
-        pygame.draw.rect(surface, bg, rect, border_radius=8)
-        text = self.font.render(label, True, theme.TEXT)
+            if bordered:
+                color = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
+                pygame.draw.rect(surface, color, rect, width=2, border_radius=8)
+            elif option:
+                pygame.draw.rect(
+                    surface, (70, 78, 86) if over else (50, 56, 62), rect, border_radius=8
+                )
+            else:
+                bg = theme.BUTTON_BG_OVER if over else theme.BUTTON_BG
+                pygame.draw.rect(surface, bg, rect, border_radius=8)
+            text = font.render(label, True, theme.TEXT)
         surface.blit(text, text.get_rect(center=rect.center))
         self._buttons[bid] = rect
-        return rect.bottom + 12
+        return rect.bottom + (8 if self._on_scroll else 12)
 
     def _field(self, surface, fid, label, field: TextField, area, y) -> int:
-        caption = self.small_font.render(label, True, theme.TEXT_DIM)
-        surface.blit(caption, (area.x + 40, y))
-        rect = pygame.Rect(area.x + 40, y + 20, area.width - 80, 34)
+        pad = 20
+        cap_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        caption = self.small_font.render(label, True, cap_color)
+        surface.blit(caption, (area.x + pad, y))
+        rect = pygame.Rect(area.x + pad, y + 20, area.width - 2 * pad, 30)
         focused = self.focused == fid
-        pygame.draw.rect(surface, (30, 34, 40), rect, border_radius=6)
-        pygame.draw.rect(
-            surface, theme.TEXT if focused else (90, 96, 104), rect, width=2, border_radius=6
-        )
+        if self._on_scroll:
+            overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
+            overlay.fill((255, 250, 235, 70))
+            surface.blit(overlay, rect.topleft)
+            pygame.draw.rect(
+                surface, INK_HOVER if focused else INK, rect, width=2, border_radius=6
+            )
+            txt_color = INK
+        else:
+            pygame.draw.rect(surface, (30, 34, 40), rect, border_radius=6)
+            pygame.draw.rect(
+                surface, theme.TEXT if focused else (90, 96, 104), rect, width=2, border_radius=6
+            )
+            txt_color = theme.TEXT
         shown = field.value + ("_" if focused else "")
-        text = self.font.render(shown, True, theme.TEXT)
-        surface.blit(text, (rect.x + 10, rect.y + 4))
+        text = self.font.render(shown, True, txt_color)
+        surface.blit(text, (rect.x + 10, rect.y + 3))
         self._fields[fid] = rect
-        return rect.bottom + 14
+        return rect.bottom + 10

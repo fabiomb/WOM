@@ -192,6 +192,51 @@ def test_conexion_fallida_no_rompe(screen):
     client.draw(screen)
 
 
+def test_chat_de_la_sala(screen):
+    """En la sala de espera, enviar un mensaje lo refleja localmente y el rival
+    lo recibe (el chat ya viaja por la sesión del lobby)."""
+    host = MultiplayerScreen("Host")
+    host.mode = "create"
+    host.f_hostport.value = "0"
+    host._activate("host_start")
+    port = host.server.port
+
+    client = MultiplayerScreen("Cliente")
+    client.mode = "connect"
+    client.f_ip.value = "127.0.0.1"
+    client.f_connectport.value = str(port)
+    client._activate("connect_start")
+
+    try:
+        assert _pump(
+            [host, client],
+            lambda: host.session is not None
+            and host.session.state is SessionState.LOBBY
+            and client.session is not None
+            and client.session.state is SessionState.LOBBY,
+        ), "no se alcanzó el lobby"
+
+        # El host escribe y envía con Enter: se ve de inmediato en su propio log.
+        host.focused = "chat"
+        for ch in "hola":
+            host.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": 0, "unicode": ch}))
+        host.handle_event(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_RETURN, "unicode": ""}))
+        assert host.f_chat.value == "" and host.focused == "chat"  # listo para seguir
+        assert ("Host", "hola") in host.chat_log
+
+        # El cliente lo recibe al bombear la sesión.
+        assert _pump(
+            [host, client],
+            lambda: any(text == "hola" for _name, text in client.chat_log),
+        ), "el cliente no recibió el chat"
+
+        client.mode = "waiting"
+        client.draw(screen)  # dibuja el panel de chat sin romper
+    finally:
+        host._teardown()
+        client._teardown()
+
+
 def test_cancelar_vuelve_al_hub(screen):
     host = MultiplayerScreen("Host")
     host.mode = "create"
