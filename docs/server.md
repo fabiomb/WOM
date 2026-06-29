@@ -215,6 +215,15 @@ El `NetGame` del host hoy hace `bundle = {self.human_id: self._local_orders,
 - **No necesita renderizar nada.** El servidor corre la simulación "a ciegas"
   para ser la autoridad; los transitorios de animación (`last_moves`/`last_clashes`)
   los reconstruye cada cliente localmente desde su propio `run_turn`.
+- **Zoom de batalla** (`tactical_mode` en las reglas, ver `docs/multiplayer.md`
+  §13): si está habilitado, `MatchRunner` descompone el turno (`begin_turn` →
+  resolver cada batalla → `finish_turn`) y, ante una batalla con humanos, corre
+  un `NetBattleDriver` (`wom/net/net_battle.py`) como autoridad: simula el
+  combate en tiempo real, difunde `BattleSnapshot`, aplica los `BattleVote`/
+  `BattleInput` de los jugadores y, al terminar, difunde el `BattleResult`
+  (`BattleEnd`). El servidor tickea el driver en su loop (~50 Hz); como es
+  player-less, nunca es participante (solo simula y arbitra). Si un jugador se
+  cae en plena batalla, se auto-resuelve.
 
 Esto es una **generalización**, no una reescritura: se factoriza la parte
 player-less de `NetGame`/`HostSession` y el host LAN actual pasa a ser "un

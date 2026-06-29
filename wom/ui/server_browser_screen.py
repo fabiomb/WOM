@@ -18,7 +18,8 @@ import pygame
 from wom.core.game import Game
 from wom.core.mapgen import MAP_SIZES
 from wom.core.worldmap import MAX_PLAYERS
-from wom.net.rules import MatchRules
+from wom.net.rules import MatchRules, TACTICAL_MODES, TACTICAL_OFF
+from wom.ui.multiplayer_screen import TACTICAL_LABELS
 from wom.net.server_session import (
     ChatReceived,
     Connected,
@@ -94,6 +95,7 @@ class ServerBrowserScreen:
         self.f_mmaxturns = TextField("50", numeric=True, max_len=4)
         self.create_players = 2
         self.create_size = "medio"  # tamaño de mapa de la partida a crear
+        self.create_tactical = TACTICAL_OFF  # zoom de batalla en red
         self.chat_log: list[tuple[str, str]] = []      # chat global del lobby
         self.room_chat_log: list[tuple[str, str]] = []  # chat de la sala (partida)
         self.selected_match: int | None = None
@@ -274,6 +276,9 @@ class ServerBrowserScreen:
         elif hit == "cmsize":
             sizes = list(MAP_SIZES)
             self.create_size = sizes[(sizes.index(self.create_size) + 1) % len(sizes)]
+        elif hit == "cmtactical":
+            modes = list(TACTICAL_MODES)
+            self.create_tactical = modes[(modes.index(self.create_tactical) + 1) % len(modes)]
         elif hit == "create_do":
             self._create_match()
         elif hit == "cancel_create":
@@ -294,6 +299,7 @@ class ServerBrowserScreen:
             "turn_seconds": int(self.f_mturnsecs.value or 0),
             "max_turns": int(self.f_mmaxturns.value or 50),
             "map_size": self.create_size,
+            "tactical_mode": self.create_tactical,
         }
         self.session.create_match(
             name=self.f_mname.value.strip() or "Partida",
@@ -546,6 +552,10 @@ class ServerBrowserScreen:
         y = self._button(surface, "cmplayers", f"Jugadores:  {self.create_players}", col, y, option=True)
         w, h, _f, _t = MAP_SIZES[self.create_size]
         y = self._button(surface, "cmsize", f"Mapa:  {self.create_size} ({w}x{h})", col, y, option=True)
+        y = self._button(
+            surface, "cmtactical",
+            f"Zoom de batalla:  {TACTICAL_LABELS[self.create_tactical]}", col, y, option=True,
+        )
         y = self._field(surface, "mmaxturns", "Turnos máximos", self.f_mmaxturns, col, y)
         y = self._field(surface, "mturnsecs", "Segundos por turno (0 = sin límite)", self.f_mturnsecs, col, y)
         y = self._button(surface, "create_do", "Crear", col, y + 6, bordered=True)

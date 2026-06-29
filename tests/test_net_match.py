@@ -263,3 +263,94 @@ def test_construye_la_partida_desde_un_escenario():
     assert game.world.to_dict() == world.to_dict()
     assert game.victory_mode is VictoryMode.FLAGS
     assert len(game.players) == 2 and game.players[0].name == "Ana"
+
+
+# --- zoom de batalla en el servidor dedicado ------------------------------
+
+from wom.core.worldmap import Fort, Terrain
+from wom.net.net_battle import decode_result
+from wom.net.protocol import BattleBegin, BattleEnd, BattleInput, BattleOffer
+
+
+class _FakeClock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def _duel_builder(spec, seed, names, *, scenario_loader=None):
+    """Mapa chico de pradera con dos ejércitos pegados (jugador 0 vs 1)."""
+    tiles = [[Terrain.PLAINS for _ in range(10)] for _ in range(8)]
+    forts = [Fort(position=(0, 0), owner=0), Fort(position=(9, 7), owner=1)]
+    world = WorldMap(10, 8, tiles, forts=forts)
+    players = [Player(0, names.get(0, "P0"), is_ai=False), Player(1, names.get(1, "P1"), is_ai=False)]
+    specs = [
+        {"owner": 0, "position": (4, 4), "composition": {"soldado": 30}},
+        {"owner": 1, "position": (5, 4), "composition": {"soldado": 20}},
+    ]
+    return Game.from_setup(world, players, specs, VictoryMode.TOTAL, seed=seed)
+
+
+def _start_duel(mode):
+    sink = FakeSink()
+    spec = MatchSpec(name="t", max_players=2, map_source="random", rules={"tactical_mode": mode})
+    clock = _FakeClock()
+    runner = MatchRunner(1, spec, sink, seed=1, game_builder=_duel_builder)
+    runner._clock = clock
+    for s in range(2):
+        runner.player_joined(s, LID + s, f"P{s}")
+    for s in range(2):
+        runner.handle(s, LID + s, Ready(ready=True))
+    setup = sink.last(LID, GameSetup)
+    client = Game.from_dict(setup.state)
+    army0 = runner.game.armies_of(0)[0]
+    runner.handle(0, LID, Orders(turn=0, orders=encode_orders([MoveOrder(army_id=army0.id, path=((5, 4),))])))
+    runner.handle(1, LID + 1, Orders(turn=0, orders=encode_orders([])))
+    runner.update()  # arma el bundle y arranca la batalla dirigida
+    return sink, runner, clock, client
+
+
+def _replay_client(sink, client):
+    """El cliente reproduce el turno: bundle + el BattleEnd que difundió el server."""
+    bundle = _turn_bundle(sink, 0)
+    combined = canonical_order([o for ods in bundle.values() for o in ods])
+    queue = client.begin_turn(combined)
+    end = [m for m in sink.outbox[LID] if isinstance(m, BattleEnd)][-1]
+    result = decode_result(end.result) if end.result else None
+    a, d = queue[0]
+    client.resolve_one_battle(a, d, result=result)
+    client.finish_turn()
+
+
+def test_match_battle_always_keeps_client_in_sync():
+    sink, runner, clock, client = _start_duel("always")
+    assert sink.last(LID, BattleBegin) is not None  # modo obligatorio: directo a begin
+    runner.handle(0, LID, BattleInput(battle_id=0, kind="ready"))
+    runner.handle(1, LID + 1, BattleInput(battle_id=0, kind="ready"))
+    for _ in range(3000):
+        clock.t += 0.1
+        runner.update()
+        if runner._turn > 0:
+            break
+    assert runner._turn > 0 and runner.game.battles_fought == 1
+    _replay_client(sink, client)
+    assert client.to_dict() == runner.game.to_dict()
+
+
+def test_match_battle_agree_decline_auto_resolves():
+    sink, runner, clock, client = _start_duel("agree")
+    assert sink.last(LID, BattleOffer) is not None  # modo acordado: ofrece votar
+    runner.handle(0, LID, BattleInput(battle_id=0, kind="ready"))  # ignorado en voting
+    runner.handle(0, LID, _vote(0, True))
+    runner.handle(1, LID + 1, _vote(1, False))  # un "no" → auto
+    runner.update()
+    assert runner._turn > 0 and runner.game.battles_fought == 1
+    _replay_client(sink, client)
+    assert client.to_dict() == runner.game.to_dict()
+
+
+def _vote(seat, zoom):
+    from wom.net.protocol import BattleVote
+    return BattleVote(battle_id=0, zoom=zoom)

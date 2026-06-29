@@ -94,20 +94,28 @@ class BattleScreen:
     """Render + input del combate táctico. La conduce GameScreen."""
 
     def __init__(
-        self, battle: TacticalBattle, human_owner: int, enemy_level: str | None = None
+        self, battle: TacticalBattle, human_owner: int, enemy_level: str | None = None,
+        *, net=None, participant: bool = True,
     ):
         self.battle = battle
         self.human_owner = human_owner
+        # En red el modelo lo simula la autoridad (NetGame/MatchRunner): esta
+        # pantalla solo renderiza y enruta el input. `participant` distingue al
+        # jugador que da órdenes del espectador (mira, sin input).
+        self.net = net
+        self.participant = participant if net is not None else True
         self.enemy_owner = (
             battle.defender_owner
             if human_owner == battle.attacker_owner
             else battle.attacker_owner
         )
-        # La IA del rival usa el nivel de su ejército (facil/medio/dificil),
-        # igual que el resto del juego, no un manejo fijo de horda.
-        self.ai = TacticalAI.for_level(self.enemy_owner, enemy_level)
-        # La IA elige su formación de despliegue para esta batalla.
-        self.ai.plan_formation(battle)
+        # La IA del rival solo corre en single-player; en red la conduce la
+        # autoridad junto con la simulación.
+        if net is None:
+            self.ai = TacticalAI.for_level(self.enemy_owner, enemy_level)
+            self.ai.plan_formation(battle)
+        else:
+            self.ai = None
         # Formación activa del humano (arranca en línea); el jugador la cambia
         # con 1/2/3/4 durante la preparación.
         self.formation = battle.formation_of(human_owner)
@@ -144,9 +152,10 @@ class BattleScreen:
         # con Espacio / el botón "Comenzar").
         self.phase = "planning"
         self._countdown = PREP_SECONDS
-        self.battle.command(
-            [u.id for u in self._my_units()], "hold"
-        )
+        if net is None:
+            # Las fichas del humano arrancan en "aguantar" (en red ya lo hizo la
+            # autoridad sobre el modelo compartido).
+            self.battle.command([u.id for u in self._my_units()], "hold")
 
         self.title_font = pygame.font.SysFont(None, 56)
         self.font = pygame.font.SysFont(None, 28)
@@ -258,27 +267,29 @@ class BattleScreen:
     def _on_key(self, key: int) -> None:
         if key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_KP_ENTER):
             if self.phase == "planning":
-                self.phase = "fighting"  # arranca el combate
+                self._begin_fight()  # arranca el combate / marca "listo"
             return
         if self.phase == "planning" and key in _FORMATION_KEYS:
-            self.battle.set_formation(self.human_owner, _FORMATION_KEYS[key])
-            self.formation = _FORMATION_KEYS[key]
+            self._apply_formation(_FORMATION_KEYS[key])
             return
         if key == pygame.K_ESCAPE:
-            self.paused = not self.paused
+            if self.net is None:  # en red no se puede pausar la simulación remota
+                self.paused = not self.paused
         elif key in (pygame.K_h,):
-            self.battle.command(self.selected, "hold")
+            self._cmd(self.selected, "hold")
         elif key in (pygame.K_a,):  # seleccionar todas mis fichas
             self.selected = {u.id for u in self._my_units()}
 
     def _on_mouse_down(self, event: pygame.event.Event) -> None:
         if event.button == 1:
-            if self._auto_btn.collidepoint(event.pos):
+            # El botón de auto-resolver solo existe en single-player (en red la
+            # batalla la resuelve la autoridad por modo/voto/desconexión).
+            if self.net is None and self._auto_btn.collidepoint(event.pos):
                 self.auto_resolve = True
                 self.done = True
                 return
             if self.phase == "planning" and self._start_btn.collidepoint(event.pos):
-                self.phase = "fighting"
+                self._begin_fight()
                 return
             if self.phase == "planning" and self._click_formation(event.pos):
                 return
@@ -292,10 +303,32 @@ class BattleScreen:
         si tomó el clic (para no iniciar una caja de selección)."""
         for key, (rect, _text) in self._formation_rects.items():
             if rect.inflate(10, 6).collidepoint(pos):
-                self.battle.set_formation(self.human_owner, key)
-                self.formation = key
+                self._apply_formation(key)
                 return True
         return False
+
+    # --- ruteo de input (single-player muta el modelo; red lo envía) ------
+    def _cmd(self, unit_ids, kind: str, target=None) -> None:
+        ids = list(unit_ids)
+        if not ids:
+            return
+        if self.net is None:
+            self.battle.command(ids, kind, target)
+        elif self.participant:
+            self.net.battle_command(ids, kind, target)
+
+    def _apply_formation(self, formation: str) -> None:
+        self.formation = formation
+        if self.net is None:
+            self.battle.set_formation(self.human_owner, formation)
+        elif self.participant:
+            self.net.battle_set_formation(formation)
+
+    def _begin_fight(self) -> None:
+        if self.net is None:
+            self.phase = "fighting"
+        elif self.participant:
+            self.net.battle_ready()
 
     def _on_mouse_up(self, event: pygame.event.Event) -> None:
         if self._drag_start is None:
@@ -323,10 +356,10 @@ class BattleScreen:
     def _issue_order(self, pos: tuple[int, int]) -> None:
         enemy = self._unit_at(pos, owner=self.enemy_owner)
         if enemy is not None:
-            self.battle.command(self.selected, "attack", enemy.id)
+            self._cmd(self.selected, "attack", enemy.id)
         else:
             cx, cy = self.to_cell(*pos)
-            self.battle.command(self.selected, "move", (cx, cy))
+            self._cmd(self.selected, "move", (cx, cy))
 
     def _unit_at(self, pos: tuple[int, int], *, owner: int) -> Unit | None:
         best, best_d = None, (self.cell * 0.7) ** 2
@@ -350,6 +383,9 @@ class BattleScreen:
             return
         dt = (ticks - self._last_ticks) / 1000.0
         self._last_ticks = ticks
+        if self.net is not None:
+            self._update_net(dt)
+            return
         if self.done or self.paused or self.result is not None:
             return
         if self.phase == "planning":
@@ -366,6 +402,27 @@ class BattleScreen:
         self.selected = {uid for uid in self.selected if self._alive(uid)}
         if self.battle.finished and self.result is None:
             self.result = self.battle.to_battle_result()
+
+    def _update_net(self, dt: float) -> None:
+        """En red la autoridad simula: solo seguimos su fase/cuenta y animamos.
+
+        El modelo (`self.battle`) lo actualiza `NetGame` (host: el sim vivo;
+        cliente: el espejo de snapshots). Acá no se llama a `step`/`ai`."""
+        phase = self.net.battle_phase()
+        self.phase = "fighting" if phase == "fighting" else "planning"
+        self._countdown = self.net.battle_countdown()
+        # Interpola el espejo del cliente hacia la última posición autoritativa
+        # (no-op en el host, que ya tiene el sim vivo a ritmo de frame).
+        self.net.battle_interpolate(dt)
+        if self.net.is_host:
+            self._spawn_arrows()  # del sim vivo (attack_events del último step)
+        else:
+            for seg in self.net.battle_arrows():
+                self._arrows.append(
+                    {"from": (seg[0], seg[1]), "to": (seg[2], seg[3]), "t": 0.0, "dur": 0.22}
+                )
+        self._age_arrows(dt)
+        self.selected = {uid for uid in self.selected if self._alive(uid)}
 
     def _spawn_arrows(self) -> None:
         """Crea una flecha por cada ataque de arquero de este step (visual)."""
@@ -523,27 +580,36 @@ class BattleScreen:
         dfn = b.side_troops(b.defender_owner)
         mine = atk if self.human_owner == b.attacker_owner else dfn
         theirs = dfn if self.human_owner == b.attacker_owner else atk
-        txt = self.font.render(
-            f"Tus tropas: {mine}    Enemigo: {theirs}    Tiempo: {int(b.elapsed)}s",
-            True, theme.TEXT,
-        )
+        spectator = self.net is not None and not self.participant
+        if spectator:
+            label = f"Atacante: {atk}    Defensor: {dfn}    Tiempo: {int(b.elapsed)}s"
+        else:
+            label = f"Tus tropas: {mine}    Enemigo: {theirs}    Tiempo: {int(b.elapsed)}s"
+        txt = self.font.render(label, True, theme.TEXT)
         surface.blit(txt, (20, HUD_H // 2 - txt.get_height() // 2))
-        if self.phase == "planning":
+        ready_word = "listo" if self.net is not None else "comenzar"
+        if spectator:
+            hint_text = "Mirando la batalla — la dirigen los jugadores en combate"
+        elif self.phase == "planning":
             hint_text = (
                 "1-4: formación (línea/clásica/compacta/en V)"
-                " · clic: seleccionar · clic der.: mover · Espacio: comenzar"
+                f" · clic: seleccionar · clic der.: mover · Espacio: {ready_word}"
             )
         else:
             hint_text = (
                 "Clic: una unidad · arrastrá: grupo · clic der.: mover/atacar"
-                " · H: aguantar · A: todas · ESC: pausa"
+                " · H: aguantar · A: todas"
             )
+            if self.net is None:
+                hint_text += " · ESC: pausa"
         hint = self.small_font.render(hint_text, True, theme.TEXT_DIM)
         surface.blit(hint, (20, HUD_H - hint.get_height() - 4))
         mouse = scale.mouse_pos()
-        if self.phase == "planning":
-            self._draw_button(surface, self._start_btn, "Comenzar (Espacio)", mouse, primary=True)
-        self._draw_button(surface, self._auto_btn, "Auto-resolver", mouse)
+        if self.phase == "planning" and not spectator:
+            start_label = "Listo (Espacio)" if self.net is not None else "Comenzar (Espacio)"
+            self._draw_button(surface, self._start_btn, start_label, mouse, primary=True)
+        if self.net is None:  # auto-resolver solo en single-player
+            self._draw_button(surface, self._auto_btn, "Auto-resolver", mouse)
 
     def _draw_button(self, surface, rect, text, mouse, *, primary=False) -> None:
         if primary:

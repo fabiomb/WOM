@@ -309,3 +309,123 @@ def test_peer_orders_referencing_others_armies_are_dropped():
         assert host_net._validate_owned(peer, player_id=1) == []
     finally:
         _close(server, host_s, clients_s)
+
+
+# --- zoom de batalla en red -----------------------------------------------
+# Estas pruebas validan que la batalla dirigida en red (offer/vote/begin/
+# snapshot/end) mantiene el lockstep: la autoridad simula y difunde, y todos
+# aplican el MISMO BattleResult. El reloj del combate se inyecta (`_clock`) para
+# no esperar en tiempo real.
+
+from wom.core.worldmap import Fort, Terrain, WorldMap
+
+
+def _duel_game() -> Game:
+    """Mapa chico de pradera con un fuerte por jugador y dos ejércitos pegados;
+    el jugador 0 puede entrar al tile del 1 y forzar una batalla en el turno 0."""
+    tiles = [[Terrain.PLAINS for _ in range(10)] for _ in range(8)]
+    forts = [Fort(position=(0, 0), owner=0), Fort(position=(9, 7), owner=1)]
+    world = WorldMap(10, 8, tiles, forts=forts)
+    players = [Player(0, "P0", is_ai=False), Player(1, "P1", is_ai=False)]
+    specs = [
+        {"owner": 0, "position": (4, 4), "composition": {"soldado": 30}},
+        {"owner": 1, "position": (5, 4), "composition": {"soldado": 20}},
+    ]
+    return Game.from_setup(world, players, specs, VictoryMode.TOTAL, seed=1)
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _battle_nets(mode: str):
+    games = [_duel_game(), _duel_game()]
+    assert games[0].to_dict() == games[1].to_dict()
+    server, host_s, clients_s = _playing_group(2)
+    host_net = NetGame(host_s, games[0], 0, is_host=True, tactical_mode=mode)
+    client_net = NetGame(clients_s[0], games[1], 1, is_host=False, tactical_mode=mode)
+    clock = _FakeClock()
+    host_net._clock = clock
+    client_net._clock = clock
+    return server, host_s, clients_s, [host_net, client_net], clock
+
+
+def _attack_orders(net: NetGame):
+    """El jugador 0 marcha sobre el tile del jugador 1 (fuerza batalla)."""
+    if net.human_id != 0:
+        return []
+    army = net.game.armies_of(0)[0]
+    return [MoveOrder(army_id=army.id, path=((5, 4),))]
+
+
+def _pump(nets, clock, *, dt=0.1, steps=4000, until=None):
+    # Avanza el reloj (fake) para el dt del combate y deja respirar al socket de
+    # loopback (entrega real) con una pausa mínima por iteración.
+    for _ in range(steps):
+        clock.t += dt
+        for n in nets:
+            n.update()
+        if until is not None and until():
+            return
+        time.sleep(0.002)
+    if until is not None:
+        raise AssertionError("condición no alcanzada")
+
+
+def test_net_battle_always_stays_in_sync():
+    server, host_s, clients_s, nets, clock = _battle_nets("always")
+    host_net, client_net = nets
+    try:
+        host_net.submit_local_orders(_attack_orders(host_net))
+        client_net.submit_local_orders([])
+        # Espera a que ambos abran la batalla dirigida.
+        _pump(nets, clock, until=lambda: host_net.battle_present() and client_net.battle_present())
+        assert host_net.battle_is_participant() and client_net.battle_is_participant()
+        # Ambos marcan "listo" → arranca el combate antes del countdown.
+        host_net.battle_ready()
+        client_net.battle_ready()
+        # Corre hasta que el turno se resuelve en ambos nodos.
+        _pump(nets, clock, until=lambda: host_net.game.turn > 0 and client_net.game.turn > 0)
+        assert host_net.game.to_dict() == client_net.game.to_dict()
+        assert not host_net.desync and not client_net.desync
+        assert host_net.game.battles_fought == 1
+    finally:
+        _close(server, host_s, clients_s)
+
+
+def test_net_battle_agree_decline_auto_resolves():
+    server, host_s, clients_s, nets, clock = _battle_nets("agree")
+    host_net, client_net = nets
+    try:
+        host_net.submit_local_orders(_attack_orders(host_net))
+        client_net.submit_local_orders([])
+        _pump(nets, clock, until=lambda: host_net.battle_present() and client_net.battle_present())
+        assert host_net.battle_phase() == "voting"
+        # El host acepta, el cliente rechaza → se auto-resuelve.
+        host_net.battle_vote(True)
+        client_net.battle_vote(False)
+        _pump(nets, clock, until=lambda: host_net.game.turn > 0 and client_net.game.turn > 0)
+        assert host_net.game.to_dict() == client_net.game.to_dict()
+        assert host_net.game.battles_fought == 1
+    finally:
+        _close(server, host_s, clients_s)
+
+
+def test_net_battle_disconnect_auto_resolves():
+    server, host_s, clients_s, nets, clock = _battle_nets("always")
+    host_net, client_net = nets
+    try:
+        host_net.submit_local_orders(_attack_orders(host_net))
+        client_net.submit_local_orders([])
+        _pump(nets, clock, until=lambda: host_net.battle_present())
+        # El cliente se cae en plena batalla: el host la auto-resuelve y sigue.
+        clients_s[0].connection.close()
+        _pump([host_net], clock, until=lambda: host_net.game.turn > 0)
+        assert host_net.game.battles_fought == 1
+        assert host_net.active_battle is None
+    finally:
+        _close(server, host_s, clients_s)

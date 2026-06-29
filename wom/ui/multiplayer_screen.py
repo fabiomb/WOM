@@ -29,7 +29,20 @@ from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
 from wom.core.worldmap import MAX_PLAYERS
 from wom.net.protocol import GameSetup
-from wom.net.rules import MatchRules
+from wom.net.rules import (
+    MatchRules,
+    TACTICAL_AGREE,
+    TACTICAL_ALWAYS,
+    TACTICAL_OFF,
+    TACTICAL_MODES,
+)
+
+# Etiquetas del zoom de batalla en red (regla cíclica del host).
+TACTICAL_LABELS = {
+    TACTICAL_OFF: "Off (auto-resolver)",
+    TACTICAL_AGREE: "Acordado (si ambos aceptan)",
+    TACTICAL_ALWAYS: "Siempre",
+}
 from wom.net.session import (
     ChatReceived,
     ClientSession,
@@ -132,6 +145,7 @@ class MultiplayerScreen:
         self.victory_mode = VictoryMode.TOTAL
         self.map_size = "medio"
         self.n_players = 2  # total de jugadores (2..MAX_PLAYERS)
+        self.tactical_mode = TACTICAL_OFF  # zoom de batalla en red
 
         # Estado de red.
         self.role: str | None = None
@@ -192,6 +206,7 @@ class MultiplayerScreen:
         self._host_rules = MatchRules(
             turn_seconds=int(self.f_turnsecs.value or 0),
             max_turns=int(self.f_maxturns.value or 50),
+            tactical_mode=self.tactical_mode,
         )
         # El tope de turnos se hornea en el estado (viaja en el to_dict y lo
         # evalúa el core de forma idéntica en todos los clientes).
@@ -321,6 +336,8 @@ class MultiplayerScreen:
             self.victory_mode = _next(VICTORY_MODES, self.victory_mode)
         elif hit == "map_size":
             self.map_size = _next(list(MAP_SIZES), self.map_size)
+        elif hit == "tactical_mode":
+            self.tactical_mode = _next(list(TACTICAL_MODES), self.tactical_mode)
         elif hit == "host_start":
             self._start_hosting()
         elif hit == "connect_start":
@@ -460,6 +477,10 @@ class MultiplayerScreen:
         y = self._button(
             surface, "map_size", f"Mapa:  {self.map_size} ({width}x{height})",
             col, y, option=True,
+        )
+        y = self._button(
+            surface, "tactical_mode",
+            f"Zoom de batalla:  {TACTICAL_LABELS[self.tactical_mode]}", col, y, option=True,
         )
         y = self._field(surface, "maxturns", "Turnos máximos", self.f_maxturns, col, y)
         y = self._field(

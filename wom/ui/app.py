@@ -122,6 +122,7 @@ def _start_net_game(net_start, music=None) -> GameScreen:
         is_host=is_host,
         peer_name=net_start.peer_name,
         ai_factory=ai_factory,
+        tactical_mode=net_start.rules.tactical_mode,
     )
     return GameScreen(
         net_start.game,

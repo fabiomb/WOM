@@ -28,6 +28,12 @@ from typing import Callable
 from wom.net.config_fingerprint import config_fingerprint
 from wom.net.protocol import (
     PROTOCOL_VERSION,
+    BattleBegin,
+    BattleEnd,
+    BattleInput,
+    BattleOffer,
+    BattleSnapshot,
+    BattleVote,
     Bye,
     Chat,
     GameSetup,
@@ -121,6 +127,56 @@ class ChatReceived:
     ts: float
 
 
+# --- eventos del zoom de batalla en red -----------------------------------
+# La autoridad difunde Offer/Begin/Snapshot/End (los reciben los clientes); los
+# participantes mandan Vote/Input (los recibe la autoridad). El evento envuelve
+# el mensaje del protocolo tal cual; `NetGame`/`MatchRunner` lo interpretan.
+
+
+@dataclass(frozen=True)
+class BattleOfferReceived:
+    """cliente: la autoridad ofrece dirigir una batalla (modo agree)."""
+
+    message: BattleOffer
+
+
+@dataclass(frozen=True)
+class BattleBeginReceived:
+    """cliente: arranca el zoom de una batalla."""
+
+    message: BattleBegin
+
+
+@dataclass(frozen=True)
+class BattleSnapshotReceived:
+    """cliente: estado del combate para renderizar."""
+
+    message: BattleSnapshot
+
+
+@dataclass(frozen=True)
+class BattleEndReceived:
+    """cliente: la batalla terminó (resultado o auto)."""
+
+    message: BattleEnd
+
+
+@dataclass(frozen=True)
+class BattleVoteReceived:
+    """host: un participante votó dirigir/auto."""
+
+    player_id: int
+    message: BattleVote
+
+
+@dataclass(frozen=True)
+class BattleInputReceived:
+    """host: input en vivo de un participante."""
+
+    player_id: int
+    message: BattleInput
+
+
 @dataclass(frozen=True)
 class PlayerLeft:
     """host: un rival se cayó en plena partida. El slot queda libre para que
@@ -157,6 +213,12 @@ Event = (
     | HashReceived
     | StateSyncReceived
     | ChatReceived
+    | BattleOfferReceived
+    | BattleBeginReceived
+    | BattleSnapshotReceived
+    | BattleEndReceived
+    | BattleVoteReceived
+    | BattleInputReceived
     | PlayerLeft
     | PlayerRejoined
     | Disconnected
@@ -250,6 +312,10 @@ class HostSession:
         link = self._clients.get(player_id)
         if link is not None:
             link.conn.send(StateSync(turn=turn, state=state))
+
+    def broadcast_battle(self, message) -> None:
+        """Difunde un mensaje del zoom de batalla (Offer/Begin/Snapshot/End)."""
+        self._broadcast(message)
 
     def send_chat(self, text: str) -> None:
         """Chat del host: a todos los clientes (el host lo ve por NetGame)."""
@@ -387,6 +453,10 @@ class HostSession:
             events.append(OrdersReceived(player_id, message.turn, message.orders))
         elif isinstance(message, Hash):
             events.append(HashReceived(player_id, message.turn, message.digest))
+        elif isinstance(message, BattleVote):
+            events.append(BattleVoteReceived(player_id, message))
+        elif isinstance(message, BattleInput):
+            events.append(BattleInputReceived(player_id, message))
         elif isinstance(message, Chat):
             events.append(ChatReceived(message.name, message.text, message.ts))
             self._relay_chat(message, exclude=player_id)
@@ -476,6 +546,12 @@ class ClientSession:
     def submit_hash(self, turn: int, digest: str) -> None:
         self.connection.send(Hash(turn=turn, digest=digest))
 
+    def send_battle_vote(self, battle_id: int, zoom: bool) -> None:
+        self.connection.send(BattleVote(battle_id=battle_id, zoom=zoom))
+
+    def send_battle_input(self, message: BattleInput) -> None:
+        self.connection.send(message)
+
     def send_chat(self, text: str) -> None:
         self.connection.send(Chat(name=self.name, text=text, ts=time.time()))
 
@@ -529,5 +605,13 @@ class ClientSession:
             events.append(TurnReady(message.turn, bundle))
         elif isinstance(message, StateSync):
             events.append(StateSyncReceived(message.turn, message.state))
+        elif isinstance(message, BattleOffer):
+            events.append(BattleOfferReceived(message))
+        elif isinstance(message, BattleBegin):
+            events.append(BattleBeginReceived(message))
+        elif isinstance(message, BattleSnapshot):
+            events.append(BattleSnapshotReceived(message))
+        elif isinstance(message, BattleEnd):
+            events.append(BattleEndReceived(message))
         elif isinstance(message, Chat):
             events.append(ChatReceived(message.name, message.text, message.ts))

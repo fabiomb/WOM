@@ -20,6 +20,12 @@ from enum import Enum, auto
 from wom.net.config_fingerprint import config_fingerprint
 from wom.net.protocol import (
     PROTOCOL_VERSION,
+    BattleBegin,
+    BattleEnd,
+    BattleInput,
+    BattleOffer,
+    BattleSnapshot,
+    BattleVote,
     Bye,
     Chat,
     CreateMatch,
@@ -42,7 +48,16 @@ from wom.net.protocol import (
 # Los eventos de la FASE DE PARTIDA se reusan de `session` tal cual los espera el
 # `NetGame` del cliente (drop-in: la partida en red por servidor usa el mismo
 # lockstep que LAN). Los eventos de LOBBY son propios de este módulo.
-from wom.net.session import ChatReceived, Disconnected, StateSyncReceived, TurnReady
+from wom.net.session import (
+    BattleBeginReceived,
+    BattleEndReceived,
+    BattleOfferReceived,
+    BattleSnapshotReceived,
+    ChatReceived,
+    Disconnected,
+    StateSyncReceived,
+    TurnReady,
+)
 from wom import __version__
 
 
@@ -188,6 +203,12 @@ class ServerSession:
     def submit_hash(self, turn: int, digest: str) -> None:
         self.connection.send(Hash(turn=turn, digest=digest))
 
+    def send_battle_vote(self, battle_id: int, zoom: bool) -> None:
+        self.connection.send(BattleVote(battle_id=battle_id, zoom=zoom))
+
+    def send_battle_input(self, message: BattleInput) -> None:
+        self.connection.send(message)
+
     def cancel(self, reason: str = "salida del jugador") -> None:
         if self.state is not ServerState.CLOSED:
             self.connection.send(Bye(reason=reason))
@@ -252,3 +273,11 @@ class ServerSession:
             events.append(TurnReady(message.turn, bundle))
         elif isinstance(message, StateSync):
             events.append(StateSyncReceived(message.turn, message.state))
+        elif isinstance(message, BattleOffer):
+            events.append(BattleOfferReceived(message))
+        elif isinstance(message, BattleBegin):
+            events.append(BattleBeginReceived(message))
+        elif isinstance(message, BattleSnapshot):
+            events.append(BattleSnapshotReceived(message))
+        elif isinstance(message, BattleEnd):
+            events.append(BattleEndReceived(message))

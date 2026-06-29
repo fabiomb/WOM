@@ -165,6 +165,8 @@ class GameScreen:
         self._tactical_battle: BattleScreen | None = None
         self._tactical_active: tuple[int, int] | None = None
         self._tactical_pre: list[dict] | None = None
+        # Red: id de la batalla que el humano ya votó (para no repetir el modal).
+        self._net_battle_id: int | None = None
         # Ayuda visual rápida (F1): modal por encima de todo, no toca el juego.
         self.help = HelpOverlay()
         self._dialog_buttons: dict[str, pygame.Rect] = {}
@@ -240,6 +242,24 @@ class GameScreen:
         # Combate táctico activo: la pantalla de batalla domina todo el input.
         if self._tactical_battle is not None:
             self._tactical_battle.handle_event(event)
+            return
+        # Red: hay una batalla en curso (votación). El chat sigue disponible; el
+        # modal de voto se atiende acá y el resto del input se traga (esperar).
+        if self.net is not None and self.net.battle_present():
+            if self._handle_chat(event):
+                return
+            if self._net_voting() and event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_z, pygame.K_RETURN, pygame.K_KP_ENTER):
+                    self._resolve_net_vote(True)
+                elif event.key in (pygame.K_a, pygame.K_ESCAPE):
+                    self._resolve_net_vote(False)
+            elif self._net_voting() and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                yes = self._dialog_buttons.get("yes")
+                no = self._dialog_buttons.get("no")
+                if yes is not None and yes.collidepoint(event.pos):
+                    self._resolve_net_vote(True)
+                elif no is not None and no.collidepoint(event.pos):
+                    self._resolve_net_vote(False)
             return
         # Modal "¿zoom o auto-resolver?": Z/Enter abre el zoom, A/ESC auto.
         if self._tactical_prompt is not None:
@@ -754,6 +774,43 @@ class GameScreen:
         self._tactical_active = None
         self._advance_tactical_queue()
 
+    def _sync_net_battle(self) -> None:
+        """Red: abre/cierra la pantalla de batalla según el estado del NetGame.
+
+        La autoridad simula; esta pantalla solo refleja. Durante la votación
+        (modo acordado) no se abre la pantalla completa: el modal de voto se
+        dibuja sobre el mapa. La batalla se cierra cuando la autoridad la
+        resolvió (`battle_present()` pasa a False) y la animación de recap del
+        turno sigue como siempre cuando se consume el resultado del turno."""
+        present = self.net.battle_present()
+        if not present:
+            if self._tactical_battle is not None:
+                self._tactical_battle = None
+            self._net_battle_id = None
+            return
+        phase = self.net.battle_phase()
+        if phase in ("prep", "fighting") and self._tactical_battle is None:
+            target = self.net.battle_render_target()
+            if target is not None:
+                self._tactical_battle = BattleScreen(
+                    target, human_owner=self.human_id, net=self.net,
+                    participant=self.net.battle_is_participant(),
+                )
+
+    def _net_voting(self) -> bool:
+        """Hay una votación de batalla pendiente para el humano local."""
+        return (
+            self.net is not None
+            and self.net.battle_present()
+            and self.net.battle_phase() == "voting"
+            and self.net.battle_is_participant()
+            and self._net_battle_id != self.net._current_battle_id()
+        )
+
+    def _resolve_net_vote(self, zoom: bool) -> None:
+        self._net_battle_id = self.net._current_battle_id()  # no volver a preguntar
+        self.net.battle_vote(zoom)
+
     def _end_turn_net(self) -> None:
         """Modo red: envía las órdenes locales y espera al rival; el turno se
         ejecuta en `update()` cuando llegan las dos listas."""
@@ -772,14 +829,19 @@ class GameScreen:
         táctico si hay uno activo; en red conduce el lockstep y dispara la
         animación de cada turno; sin red ni batalla, no hace nada."""
         self._update_result_audio()  # agacha la música mientras suena el clip de fin
+        if self.net is None:
+            # Single-player: la pantalla de batalla conduce su propia simulación.
+            if self._tactical_battle is not None:
+                self._tactical_battle.update()
+                if self._tactical_battle.done:
+                    self._finish_tactical_battle()
+            return
+        # En red el lockstep (y la batalla dirigida por la autoridad) deben
+        # avanzar SIEMPRE, aunque haya una pantalla de batalla abierta.
+        self.net.update()
+        self._sync_net_battle()
         if self._tactical_battle is not None:
             self._tactical_battle.update()
-            if self._tactical_battle.done:
-                self._finish_tactical_battle()
-            return
-        if self.net is None:
-            return
-        self.net.update()
         resolved = self.net.consume_resolved()
         if resolved is not None:
             self.result, pre_turn = resolved
@@ -899,6 +961,8 @@ class GameScreen:
             )
         elif self._tactical_prompt is not None:
             self._draw_tactical_prompt(surface)
+        elif self.net is not None and self.net.battle_present() and self.net.battle_phase() == "voting":
+            self._draw_net_battle_prompt(surface)
         # La ayuda va arriba de todo (incluidos los modales).
         self.help.draw(surface, self.game)
         # La intro del escenario, si sigue abierta, manda sobre todo lo demás.
@@ -984,6 +1048,62 @@ class GameScreen:
 
         yes = pygame.Rect(box.x + 30, box.bottom - 58, 210, 40)
         no = pygame.Rect(box.right - 240, box.bottom - 58, 210, 40)
+        mouse = scale.mouse_pos()
+        for rect, text, base, hover in (
+            (yes, "Dirigir batalla (Z)", theme.BUTTON_BG, theme.BUTTON_BG_OVER),
+            (no, "Auto-resolver (A)", (50, 56, 62), (70, 78, 86)),
+        ):
+            color = hover if rect.collidepoint(mouse) else base
+            pygame.draw.rect(surface, color, rect, border_radius=6)
+            label = self.hud.font.render(text, True, theme.TEXT)
+            surface.blit(label, label.get_rect(center=rect.center))
+        self._dialog_buttons = {"yes": yes, "no": no}
+
+    def _draw_net_battle_prompt(self, surface: pygame.Surface) -> None:
+        """Modal de votación (modo acordado): cada humano del combate decide
+        dirigir o auto. El zoom se abre solo si todos aceptan. El espectador (o
+        quien ya votó) solo ve un aviso de espera."""
+        ids = self.net.battle_army_ids()
+        attacker = self.game.army_by_id(ids[0]) if ids else None
+        defender = self.game.army_by_id(ids[1]) if ids else None
+        en_fuerte = (
+            defender is not None
+            and self.game.world.fort_at(defender.position) is not None
+        )
+        lugar = "Asalto a fuerte" if en_fuerte else "Batalla en campo abierto"
+
+        overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        overlay.fill(theme.GAMEOVER_BG)
+        surface.blit(overlay, (0, 0))
+        box = pygame.Rect(0, 0, 540, 180)
+        box.center = surface.get_rect().center
+        pygame.draw.rect(surface, theme.SIDEBAR_BG, box, border_radius=8)
+        pygame.draw.rect(surface, theme.SELECTION, box, 2, border_radius=8)
+        self._dialog_buttons = {}
+
+        if not self._net_voting():
+            # Ya votó (o es espectador): espera la decisión del resto.
+            title = self.hud.font.render(f"¡{lugar}!", True, theme.TEXT)
+            wait = "Esperando la decisión de los demás…" if self.net.battle_is_participant() \
+                else "Los jugadores deciden si dirigen la batalla…"
+            detail = self.hud.small_font.render(wait, True, theme.TEXT_DIM)
+            surface.blit(title, title.get_rect(midtop=(box.centerx, box.y + 28)))
+            surface.blit(detail, detail.get_rect(midtop=(box.centerx, box.y + 70)))
+            return
+
+        atk_n = attacker.total_troops if attacker else 0
+        def_n = defender.total_troops if defender else 0
+        mine = atk_n if attacker and attacker.owner == self.human_id else def_n
+        theirs = def_n if attacker and attacker.owner == self.human_id else atk_n
+        title = self.hud.font.render(f"¡{lugar}!", True, theme.TEXT)
+        detail = self.hud.small_font.render(
+            f"Tus tropas: {mine}   ·   Enemigo: {theirs}   ·   ambos deben aceptar",
+            True, theme.TEXT_DIM,
+        )
+        surface.blit(title, title.get_rect(midtop=(box.centerx, box.y + 16)))
+        surface.blit(detail, detail.get_rect(midtop=(box.centerx, box.y + 48)))
+        yes = pygame.Rect(box.x + 30, box.bottom - 58, 220, 40)
+        no = pygame.Rect(box.right - 250, box.bottom - 58, 220, 40)
         mouse = scale.mouse_pos()
         for rect, text, base, hover in (
             (yes, "Dirigir batalla (Z)", theme.BUTTON_BG, theme.BUTTON_BG_OVER),

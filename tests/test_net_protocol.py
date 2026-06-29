@@ -4,6 +4,12 @@ import pytest
 
 from wom.net import protocol
 from wom.net.protocol import (
+    BattleBegin,
+    BattleEnd,
+    BattleInput,
+    BattleOffer,
+    BattleSnapshot,
+    BattleVote,
     Bye,
     Chat,
     CreateMatch,
@@ -63,6 +69,20 @@ MESSAGES = [
     MatchJoined(match_id=5, seat=1, roster=[[0, "Beto", True], [1, "Ana", False]]),
     LobbyChat(name="Ana", text="hola a todos", ts=99.0),
     Error(code="MATCH_FULL", message="la partida está llena"),
+    # --- zoom de batalla en red ---
+    BattleOffer(battle_id=0, attacker_id=3, defender_id=4, mode="agree", human_owners=[0, 1]),
+    BattleBegin(battle_id=0, attacker_id=3, defender_id=4, human_owners=[0, 1], seed=12345),
+    BattleSnapshot(
+        battle_id=0, phase="fighting", countdown=0.0,
+        units=[[0, 1.5, 2.0, 10.0, 0], [1, 3.0, 4.0, 0.0, 1]],
+        arrows=[[1.0, 2.0, 3.0, 4.0]],
+    ),
+    BattleEnd(battle_id=0, result={}),
+    BattleEnd(battle_id=1, result={"outcome": "ATTACKER_WINS", "attacker_losses": {"soldado": 3}}),
+    BattleVote(battle_id=0, zoom=True),
+    BattleInput(battle_id=0, kind="command", unit_ids=[1, 2], order_kind="move", target=[3, 4]),
+    BattleInput(battle_id=0, kind="formation", formation="linea"),
+    BattleInput(battle_id=0, kind="ready"),
 ]
 
 

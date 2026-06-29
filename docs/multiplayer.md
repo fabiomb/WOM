@@ -297,8 +297,62 @@ Se definen al crear la partida (pantalla de reglas) y viajan en `GAME_SETUP`:
   auto-envía las órdenes que haya. No afecta el determinismo (solo decide
   *cuándo* se emiten las órdenes locales).
 
-El resto (`turn_seconds`, `max_turns`) viaja en `MatchRules`
+- **Zoom de batalla** (`tactical_mode`, post-v1): trae el mini-RTS en tiempo
+  real del single-player a la red. Tres modos: `off` (auto-resuelve siempre,
+  como antes), `agree` (cada humano del combate ve "Dirigir / Auto-resolver" y el
+  zoom se abre **solo si todos aceptan**) y `always` (siempre se dirige). Ver §13.
+
+El resto (`turn_seconds`, `max_turns`, `tactical_mode`) viaja en `MatchRules`
 (`wom/net/rules.py`) dentro de `GAME_SETUP.rules`.
+
+---
+
+## 13. Zoom de batalla en red
+
+El combate táctico en tiempo real (`wom/core/tactical.py`) era hasta ahora solo
+de single-player; en red se trae con una **autoridad que simula y difunde**,
+porque la simulación usa floats (no determinista entre SO) y recibe input
+asíncrono. Replicarla en cada nodo divergiría; en cambio:
+
+- **La autoridad** (host LAN = `NetGame` con `is_host`; servidor =
+  `MatchRunner`) es la **única** que corre `TacticalBattle.step()`. Recibe el
+  input de los humanos participantes, transmite el estado para renderizar y, al
+  terminar, calcula `to_battle_result()` y lo difunde. Todos los nodos aplican
+  ese `BattleResult` con `resolve_one_battle(a, d, result=...)`. Como el
+  resultado es solo datos difundidos (igual que las órdenes), el lockstep no
+  diverge.
+- **Descomposición del turno**: en red, en vez de `run_turn` monolítico, se usa
+  `begin_turn` → resolver cada batalla → `finish_turn` (el mismo invariante
+  determinista). Las batallas sin humanos o en modo `off` se resuelven con el RNG
+  determinista; las dirigidas inyectan el resultado de la autoridad.
+- **El driver** (`wom/net/net_battle.py`, `NetBattleDriver`, puro) encapsula el
+  ciclo `voting → prep → fighting → done`, corre una `TacticalAI` por cada bando
+  no-humano (ausente/IA), arma los snapshots y traduce el final a `BattleResult`.
+- **Votación (`agree`)**: la autoridad emite `BattleOffer`; cada humano vota con
+  `BattleVote`; si todos aceptan emite `BattleBegin`, si no, auto-resuelve.
+- **Cuenta regresiva sincronizada**: la autoridad la difunde en los
+  `BattleSnapshot` (todos la leen igual); cada humano manda `BattleInput(ready)`
+  y al estar todos listos (o al llegar a 0) arranca el combate.
+- **Input en vivo**: `BattleInput` lleva formación, "listo" y órdenes
+  (mover/atacar/aguantar). El host las aplica directo al sim; los clientes las
+  mandan y ven el efecto en el próximo snapshot.
+- **Movimiento fluido**: los `BattleSnapshot` salen a ~30 Hz y, como esa tasa
+  igual produciría microsaltos, el cliente **interpola** entre snapshots
+  (`ClientBattle.interpolate`, suavizado exponencial hacia la última posición
+  autoritativa). Con un objetivo que avanza a velocidad constante, la salida lo
+  sigue a la misma velocidad con un retardo fijo mínimo → animación continua. El
+  host usa el sim vivo a ritmo de frame, así que ya es fluido.
+- **Espectadores** (3-4 jugadores): los que no pelean reciben igual los
+  snapshots y **miran** la batalla (sin input).
+- **Desconexión**: si un participante se cae durante la batalla, la autoridad la
+  **auto-resuelve** (`mark_absent`) y sigue; sus turnos siguientes los cubre la
+  IA como siempre.
+
+Mensajes nuevos del protocolo: `BattleOffer`/`BattleBegin`/`BattleSnapshot`/
+`BattleEnd` (autoridad→todos) y `BattleVote`/`BattleInput`
+(participante→autoridad). UI: `BattleScreen` gana un modo "red" (no simula; solo
+renderiza y enruta el input) y `GameScreen` orquesta abrir/cerrar la pantalla y
+el modal de voto según el `NetGame`.
 
 ---
 

@@ -131,6 +131,87 @@ class Chat:
     ts: float
 
 
+# --- zoom de batalla en red (combate táctico en tiempo real) --------------
+# La AUTORIDAD (host LAN o servidor) es la única que corre la simulación; el
+# resto renderiza desde los snapshots y aplica el BattleResult que difunde la
+# autoridad (`BattleEnd`). `battle_id` = índice de la batalla en la cola que
+# devuelve `Game.begin_turn` (determinista e idéntico en todos los nodos).
+
+
+@dataclass(frozen=True)
+class BattleOffer:
+    """autoridad→todos: hay una batalla con humanos. En modo `"agree"` los
+    humanos votan (`BattleVote`); en `"always"` es solo aviso (va directo a
+    `BattleBegin`). `human_owners` son los dueños humanos del combate."""
+
+    battle_id: int
+    attacker_id: int
+    defender_id: int
+    mode: str
+    human_owners: list
+
+
+@dataclass(frozen=True)
+class BattleBegin:
+    """autoridad→todos: arranca el zoom. Cada nodo arma su `TacticalBattle`
+    local (determinista desde el estado compartido + `seed`) para renderizar."""
+
+    battle_id: int
+    attacker_id: int
+    defender_id: int
+    human_owners: list
+    seed: int
+
+
+@dataclass(frozen=True)
+class BattleSnapshot:
+    """autoridad→todos: estado del combate para renderizar (~30 Hz; el cliente
+    además interpola entre snapshots para un movimiento fluido).
+    `units` = ``[[id, x, y, hp, fled(0/1)], ...]``; `arrows` = ``[[fx,fy,tx,ty],...]``."""
+
+    battle_id: int
+    phase: str        # "prep" | "fighting"
+    countdown: float
+    units: list
+    arrows: list
+
+
+@dataclass(frozen=True)
+class BattleEnd:
+    """autoridad→todos: la batalla terminó (o se auto-resolvió). `result` es el
+    `BattleResult` canónico (dict). Todos lo aplican con `resolve_one_battle`."""
+
+    battle_id: int
+    result: dict
+
+
+@dataclass(frozen=True)
+class BattleVote:
+    """participante→autoridad: acepta (`zoom=True`) o no dirigir la batalla."""
+
+    battle_id: int
+    zoom: bool
+
+
+@dataclass(frozen=True)
+class BattleInput:
+    """participante→autoridad: input en vivo del combate.
+
+    `kind`:
+    - ``"formation"``: elige formación de despliegue (`formation`).
+    - ``"ready"``: el jugador está listo (arranca el combate al estar todos).
+    - ``"command"``: orden a un grupo de fichas (`unit_ids`, `order_kind` ∈
+      move/attack/hold, `target` = celda [x,y] o id de ficha).
+    """
+
+    battle_id: int
+    kind: str
+    unit_ids: list = field(default_factory=list)
+    order_kind: str = ""
+    target: list | int | None = None
+    formation: str = ""
+
+
 @dataclass(frozen=True)
 class Ping:
     """ambos: keepalive / medición de latencia."""
@@ -266,6 +347,12 @@ Message = (
     | Ping
     | Pong
     | Bye
+    | BattleOffer
+    | BattleBegin
+    | BattleSnapshot
+    | BattleEnd
+    | BattleVote
+    | BattleInput
     | Join
     | LobbyState
     | CreateMatch
@@ -294,6 +381,12 @@ _MESSAGE_TYPES: dict[str, type] = {
         Ping,
         Pong,
         Bye,
+        BattleOffer,
+        BattleBegin,
+        BattleSnapshot,
+        BattleEnd,
+        BattleVote,
+        BattleInput,
         Join,
         LobbyState,
         CreateMatch,

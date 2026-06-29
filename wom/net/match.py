@@ -20,6 +20,7 @@ orden de un jugador solo puede tocar lo suyo.
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from enum import Enum, auto
 from typing import Callable, Protocol
@@ -35,8 +36,12 @@ from wom.core.orders import (
 from wom.core.victory import VictoryMode, VictoryResult
 from wom.net.lobby import MatchSpec
 from wom.net.lockstep import canonical_order
+from wom.net.net_battle import NetBattleDriver
 from wom.net.orders_codec import decode_orders, encode_orders
 from wom.net.protocol import (
+    BattleEnd,
+    BattleInput,
+    BattleVote,
     Chat,
     GameSetup,
     Hash,
@@ -46,7 +51,7 @@ from wom.net.protocol import (
     StateSync,
     TurnOrders,
 )
-from wom.net.rules import MatchRules
+from wom.net.rules import MatchRules, TACTICAL_OFF
 from wom.net.state_hash import state_digest
 
 
@@ -138,6 +143,18 @@ class MatchRunner:
         self._peer_hashes: dict[int, dict[int, str]] = defaultdict(dict)
         self._sync_sent: set[tuple[int, int]] = set()
 
+        # Zoom de batalla: resolución de turno por cola (puede abarcar varios
+        # ticks mientras se dirige una batalla en tiempo real).
+        self.tactical_mode = self.rules.tactical_mode
+        self._resolving = False
+        self._battle_queue: list[tuple[int, int]] = []
+        self._battle_idx = 0
+        self._turn_being_resolved = 0
+        self.active_battle: NetBattleDriver | None = None
+        # Reloj para el dt del combate en tiempo real (inyectable en tests).
+        self._clock = time.monotonic
+        self._last_tick = self._clock()
+
         self.chat_log: list[tuple[str, str]] = []
         self.result: VictoryResult | None = None
 
@@ -169,6 +186,9 @@ class MatchRunner:
             if self.ai_factory is not None and seat not in self._ai:
                 self._ai[seat] = self.ai_factory(seat)
             self._collected.get(self._turn, {}).pop(seat, None)
+            # Si dirigía la batalla en curso, se auto-resuelve (requisito 6).
+            if self.active_battle is not None:
+                self.active_battle.mark_absent(seat)
             self._system_chat(f"{self.names.get(seat, f'Jugador {seat + 1}')} se desconectó; lo cubre la IA")
             self._try_resolve()
 
@@ -199,14 +219,39 @@ class MatchRunner:
         elif isinstance(message, Hash):
             self._peer_hashes[message.turn][seat] = message.digest
             self._check_hash(message.turn, seat)
+        elif isinstance(message, BattleVote):
+            if self.active_battle is not None:
+                self.active_battle.apply_vote(seat, message.zoom)
+        elif isinstance(message, BattleInput):
+            if self.active_battle is not None:
+                self.active_battle.apply_input(
+                    seat, message.kind,
+                    unit_ids=message.unit_ids, order_kind=message.order_kind,
+                    target=message.target, formation=message.formation,
+                )
         elif isinstance(message, Chat):
             self.chat_log.append((message.name, message.text))
             self._relay_chat(message, exclude=seat)
 
     def update(self) -> None:
-        """Tick: resuelve el turno si ya están todas las órdenes presentes."""
-        if self.phase is Phase.PLAYING:
-            self._try_resolve()
+        """Tick: avanza la batalla en curso y resuelve el turno cuando se puede."""
+        now = self._clock()
+        dt = max(0.0, now - self._last_tick)
+        self._last_tick = now
+        if self.phase is not Phase.PLAYING:
+            return
+        self._tick_active_battle(dt)
+        self._try_resolve()
+
+    def _tick_active_battle(self, dt: float) -> None:
+        driver = self.active_battle
+        if driver is None:
+            return
+        driver.tick(dt)
+        for msg in driver.drain():
+            self._broadcast(msg)
+        if driver.finished:
+            self._finish_authority_battle()
 
     @property
     def finished(self) -> bool:
@@ -256,6 +301,8 @@ class MatchRunner:
     def _try_resolve(self) -> None:
         if self.phase is not Phase.PLAYING or self.game is None:
             return
+        if self._resolving or self.active_battle is not None:
+            return  # ya resolviendo este turno (quizás dirigiendo una batalla)
         present = [s for s in self.seats if s not in self._absent]
         collected = self._collected.get(self._turn, {})
         if any(seat not in collected for seat in present):
@@ -266,15 +313,73 @@ class MatchRunner:
         self._broadcast(
             TurnOrders(turn=self._turn, orders=[[s, encode_orders(od)] for s, od in bundle.items()])
         )
-        self._apply_turn(self._turn, bundle)
+        self._begin_resolution(self._turn, bundle)
 
-    def _apply_turn(self, turn: int, bundle: dict[int, list[Order]]) -> None:
+    # --- resolución del turno con cola de batallas ------------------------
+
+    def _begin_resolution(self, turn: int, bundle: dict[int, list[Order]]) -> None:
         combined = canonical_order([o for orders in bundle.values() for o in orders])
-        result = self.game.run_turn(combined)
+        self._resolving = True
+        self._turn_being_resolved = turn
+        self._battle_queue = self.game.begin_turn(combined)
+        self._battle_idx = 0
+        self._advance_battles()
+
+    def _advance_battles(self) -> None:
+        while self._battle_idx < len(self._battle_queue):
+            attacker_id, defender_id = self._battle_queue[self._battle_idx]
+            if self.tactical_mode == TACTICAL_OFF:
+                self.game.resolve_one_battle(attacker_id, defender_id)
+                self._battle_idx += 1
+                continue
+            if self._start_authority_battle(attacker_id, defender_id):
+                return  # batalla dirigida en curso
+            self._battle_idx += 1
+        self._finish_resolution()
+
+    def _start_authority_battle(self, attacker_id: int, defender_id: int) -> bool:
+        attacker = self.game.army_by_id(attacker_id)
+        defender = self.game.army_by_id(defender_id)
+        if attacker is None or defender is None:
+            self.game.resolve_one_battle(attacker_id, defender_id)
+            return False
+        humans = [o for o in dict.fromkeys((attacker.owner, defender.owner)) if o in self.seats]
+        if not humans:
+            self._broadcast(BattleEnd(battle_id=self._battle_idx, result={}))
+            self.game.resolve_one_battle(attacker_id, defender_id)
+            return False
+        self.active_battle = NetBattleDriver(
+            battle_id=self._battle_idx,
+            attacker=attacker,
+            defender=defender,
+            world=self.game.world,
+            classes=self.game.classes,
+            battle_config=self.game.config["batalla"],
+            mode=self.tactical_mode,
+            human_owners=humans,
+            seed=self._turn_being_resolved * 1000 + self._battle_idx,
+        )
+        for msg in self.active_battle.drain():
+            self._broadcast(msg)
+        self._last_tick = self._clock()
+        return True
+
+    def _finish_authority_battle(self) -> None:
+        driver = self.active_battle
+        attacker_id, defender_id = self._battle_queue[self._battle_idx]
+        self.game.resolve_one_battle(attacker_id, defender_id, result=driver.result)
+        self.active_battle = None
+        self._battle_idx += 1
+        self._advance_battles()
+
+    def _finish_resolution(self) -> None:
+        result = self.game.finish_turn()
         resolved_turn = self.game.turn  # ya incrementado
         self._auth_hashes[resolved_turn] = state_digest(self.game)
-        self._collected.pop(turn, None)
+        self._collected.pop(self._turn_being_resolved, None)
         self._turn = self.game.turn
+        self._resolving = False
+        self._battle_queue = []
         if result.is_over:
             self.result = result
             self.phase = Phase.FINISHED

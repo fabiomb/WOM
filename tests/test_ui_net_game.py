@@ -245,6 +245,19 @@ class _FakeNet:
         self.submitted = list(orders)
         self.waiting = True
 
+    # Sin batalla dirigida activa (zoom en red): la UI consulta estos métodos.
+    def battle_present(self):
+        return False
+
+    def battle_phase(self):
+        return ""
+
+    def battle_is_participant(self):
+        return False
+
+    def battle_render_target(self):
+        return None
+
     def send_chat(self, text):
         self.chat_log.append(("Yo", text))
 
