@@ -1,0 +1,5 @@
+# Normaliza los fines de línea para que los checkouts sean byte-idénticos en
+# todas las plataformas. Importa sobre todo para los JSON de balance: su huella
+# (wom/net/config_fingerprint.py) se compara en el handshake de red, así que
+# CRLF vs LF entre cliente y servidor rompía la conexión. Ver docs/multiplayer.md.
+data/config/*.json text eol=lf
