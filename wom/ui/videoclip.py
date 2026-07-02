@@ -72,6 +72,19 @@ def can_play_video() -> bool:
     return os.environ.get("SDL_VIDEODRIVER") != "dummy" and ffmpeg_available()
 
 
+def _read_frame(stream, n: int) -> bytes | None:
+    """Lee exactamente `n` bytes del pipe (un frame). None al final del stream."""
+    chunks = []
+    remaining = n
+    while remaining > 0:
+        chunk = stream.read(remaining)
+        if not chunk:
+            return None  # fin del stream (último frame incompleto descartado)
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
 class VideoClip:
     """Decodifica un .mp4 corto a frames en memoria y lo dibuja sobre pygame.
 
@@ -138,7 +151,7 @@ class VideoClip:
         frame_size = w * h * 3
         assert self._proc.stdout is not None
         while not self._stop.is_set():
-            data = self._read_exact(self._proc.stdout, frame_size)
+            data = _read_frame(self._proc.stdout, frame_size)
             if data is None:
                 break
             with self._lock:
@@ -146,19 +159,6 @@ class VideoClip:
         self._proc.stdout.close()
         self._proc.wait()
         self._proc = None
-
-    @staticmethod
-    def _read_exact(stream, n: int) -> bytes | None:
-        """Lee exactamente `n` bytes del pipe (un frame). None al final."""
-        chunks = []
-        remaining = n
-        while remaining > 0:
-            chunk = stream.read(remaining)
-            if not chunk:
-                return None  # fin del stream (último frame incompleto descartado)
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        return b"".join(chunks)
 
     def _start_audio(self, path: Path, volume: float) -> None:
         """Extrae la pista de audio a un .ogg temporal y la reproduce en un
@@ -269,4 +269,98 @@ class VideoClip:
             except OSError:
                 pass
             self._audio_path = None
+        self.available = False
+
+
+class VideoBackground:
+    """Fondo de pantalla en video, reproducido en bucle sin fin (sin audio).
+
+    A diferencia de `VideoClip` (que carga un clip corto entero a memoria para
+    fundirlo hacia una imagen), este decodifica **en streaming**: lanza ffmpeg
+    con `-stream_loop -1` y un hilo lee de a un frame, guardando solo el último
+    (memoria constante, sirve para videos largos como la portada del menú). El
+    llamador dibuja la imagen de fallback debajo; `draw` la tapa con el frame
+    actual cuando hay uno listo. Resiliente igual que `VideoClip`: sin ffmpeg,
+    sin el archivo o en headless, `draw` no pinta nada y se ve la imagen.
+    """
+
+    def __init__(self, path: str | Path, size: tuple[int, int], *, fps: int = 24):
+        self.size = (int(size[0]), int(size[1]))
+        self.fps = max(1, fps)
+        self.available = False
+        self._latest: bytes | None = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._proc: subprocess.Popen | None = None
+        self._thread: threading.Thread | None = None
+        self._surf_cache: tuple[int, pygame.Surface] | None = None
+
+        path = Path(path)
+        if not path.exists() or not can_play_video():
+            return
+        try:
+            self._thread = threading.Thread(target=self._work, args=(path,), daemon=True)
+            self._thread.start()
+            self.available = True
+        except Exception:
+            self.close()
+
+    def _work(self, path: Path) -> None:
+        """Hilo lector: decodifica en bucle y guarda el último frame, marcando
+        el ritmo (~fps) para que el bucle corra a velocidad normal."""
+        w, h = self.size
+        cmd = [
+            ffmpeg_binary(), "-nostdin", "-loglevel", "error", "-stream_loop", "-1",
+            "-i", str(path), "-vf", f"scale={w}:{h}", "-r", str(self.fps),
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+        ]
+        try:
+            self._proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                creationflags=_NO_WINDOW,
+            )
+        except Exception:
+            return
+        frame_size = w * h * 3
+        period = 1.0 / self.fps
+        assert self._proc.stdout is not None
+        while not self._stop.is_set():
+            data = _read_frame(self._proc.stdout, frame_size)
+            if data is None:
+                break  # ffmpeg terminó/murió (con -stream_loop no debería)
+            with self._lock:
+                self._latest = data
+            # El sleep frena la lectura; el pipe llena y ffmpeg se autolimita al
+            # ritmo de reproducción (backpressure), sin acelerar el video.
+            self._stop.wait(period)
+
+    def draw(self, surface: pygame.Surface, rect: pygame.Rect) -> bool:
+        """Pinta el frame actual sobre `rect`. Devuelve True si dibujó algo
+        (False mientras aún no hay frame: el llamador deja ver la imagen)."""
+        with self._lock:
+            data = self._latest
+        if data is None:
+            return False
+        key = id(data)
+        if self._surf_cache is None or self._surf_cache[0] != key:
+            surf = pygame.image.frombuffer(data, self.size, "RGB")
+            if pygame.display.get_surface() is not None:
+                surf = surf.convert()
+            self._surf_cache = (key, surf)
+        surface.blit(self._surf_cache[1], rect.topleft)
+        return True
+
+    def close(self) -> None:
+        """Corta el decodificado y el subproceso ffmpeg. Idempotente."""
+        self._stop.set()
+        proc = self._proc
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+        self._proc = None
         self.available = False

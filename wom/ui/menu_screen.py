@@ -31,6 +31,7 @@ from wom.ui import scale, theme
 from wom.ui.assets import ASSETS_DIR
 from wom.ui.music import MusicPlayer
 from wom.ui.video import RESOLUTIONS, apply_video_settings
+from wom.ui.videoclip import VideoBackground, can_play_video
 
 # MAP_SIZES (tamaños de mapa preestablecidos) vive en wom.core.mapgen (módulo
 # puro, compartido con el servidor dedicado); se reexporta acá por compatibilidad.
@@ -51,6 +52,10 @@ BUTTON_GAP = 14
 # ancho/alto de la imagen (x0, y0, x1, y1). Si el asset no existe, el menú
 # cae al fondo plano de siempre.
 TITLE_IMAGE = "title.png"
+# Video de portada opcional (data/assets/titlle-video.mp4): si hay ffmpeg y no
+# es headless, reemplaza a la imagen como fondo animado en bucle; si falta, se
+# usa title.png. Reutiliza la infra de ffmpeg de los videos de fin de partida.
+TITLE_VIDEO = "titlle-video.mp4"
 SCROLL_AREA = (0.365, 0.14, 0.615, 0.64)
 
 # "Tinta" para los botones sobre el pergamino.
@@ -129,6 +134,11 @@ class MenuScreen:
         self.background = pygame.image.load(str(path)) if path.exists() else None
         self._scaled_bg: pygame.Surface | None = None  # cache al tamaño de ventana
         self._on_scroll = False  # True si se está dibujando sobre el pergamino
+        # Video de portada (perezoso: se crea en el primer draw, ya con el
+        # tamaño de ventana; se recrea si la ventana cambia de tamaño).
+        self.video_path = ASSETS_DIR / TITLE_VIDEO
+        self._video: VideoBackground | None = None
+        self._video_size: tuple[int, int] | None = None
 
     def take_action(self) -> NewGameChoice | LoadChoice | ScenarioChoice | str | None:
         """Devuelve y consume la decisión del usuario (la lee el loop de app)."""
@@ -318,10 +328,7 @@ class MenuScreen:
     def draw(self, surface: pygame.Surface) -> None:
         self._buttons.clear()
         window = surface.get_rect()
-        if self.background is not None:
-            if self._scaled_bg is None or self._scaled_bg.get_size() != window.size:
-                self._scaled_bg = pygame.transform.smoothscale(self.background, window.size)
-            surface.blit(self._scaled_bg, (0, 0))
+        if self._draw_cover(surface, window):
             x0, y0, x1, y1 = SCROLL_AREA
             area = pygame.Rect(
                 round(window.width * x0), round(window.height * y0),
@@ -360,6 +367,39 @@ class MenuScreen:
             self._draw_pick_map(surface, area)
         else:
             self._draw_load(surface, area)
+
+    def _draw_cover(self, surface: pygame.Surface, window: pygame.Rect) -> bool:
+        """Dibuja la portada: imagen (title.png) y, encima, el video en bucle si
+        está disponible. Devuelve True si se pintó alguna portada (⇒ el menú va
+        sobre el pergamino); False si no hay ni imagen ni video (fondo plano)."""
+        drew = False
+        if self.background is not None:
+            if self._scaled_bg is None or self._scaled_bg.get_size() != window.size:
+                self._scaled_bg = pygame.transform.smoothscale(self.background, window.size)
+            surface.blit(self._scaled_bg, (0, 0))
+            drew = True
+        self._ensure_video(window.size)
+        if self._video is not None and self._video.draw(surface, window):
+            drew = True  # el frame del video tapa la imagen
+        return drew
+
+    def _ensure_video(self, size: tuple[int, int]) -> None:
+        """Crea (o recrea al cambiar el tamaño de ventana) el video de portada.
+        No hace nada en headless / sin ffmpeg / sin el archivo."""
+        if not self.video_path.exists() or not can_play_video():
+            return
+        if self._video is None or self._video_size != size:
+            if self._video is not None:
+                self._video.close()
+            self._video = VideoBackground(self.video_path, size)
+            self._video_size = size
+
+    def close(self) -> None:
+        """Libera el video de portada (corta ffmpeg y su hilo). Lo llama la app
+        al abandonar el menú, porque el hilo lector mantendría vivo el objeto."""
+        if self._video is not None:
+            self._video.close()
+            self._video = None
 
     def _draw_version(self, surface: pygame.Surface, window: pygame.Rect) -> None:
         """Número de versión abajo a la derecha, con sombra para que se lea

@@ -125,9 +125,14 @@ class HelpOverlay:
         left = pygame.Rect(panel.x + 36, top, 880, 560)
         right = pygame.Rect(left.right + col_gap, top, panel.right - 36 - (left.right + col_gap), 560)
 
-        self._draw_troops(surface, game, left)
-        bottom_of_right = self._draw_map_and_sites(surface, game, right)
-        self._draw_victory(surface, game, pygame.Rect(right.x, bottom_of_right + 16, right.width, 0))
+        # Tropas y "Cómo se gana" comparten la columna izquierda (las tropas
+        # dejan mucho hueco debajo); mapa+sitios quedan en la derecha. Así
+        # "Por dónde empezar" cabe a lo ancho debajo de ambas sin solaparse.
+        bottom_left = self._draw_troops(surface, game, left)
+        self._draw_map_and_sites(surface, game, right)
+        self._draw_victory(
+            surface, game, pygame.Rect(left.x, bottom_left + 24, left.width, 0)
+        )
 
         self._draw_start_here(
             surface, pygame.Rect(panel.x + 36, top + 580, panel.width - 72, 0)
@@ -143,15 +148,61 @@ class HelpOverlay:
         )
         return y + 44
 
-    def _draw_troops(self, surface, game: Game, rect: pygame.Rect) -> None:
+    @staticmethod
+    def _wrap(text: str, font: pygame.font.Font, max_width: int, max_lines: int = 2):
+        """Parte `text` en líneas que quepan en `max_width` (por palabras)."""
+        lines: list[str] = []
+        cur = ""
+        for word in text.split():
+            trial = f"{cur} {word}".strip()
+            if not cur or font.size(trial)[0] <= max_width:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = word
+        if cur:
+            lines.append(cur)
+        return lines[:max_lines]
+
+    def _blit_lines(self, surface, lines, font, color, x, y, lh: int = 18) -> None:
+        for j, line in enumerate(lines):
+            surface.blit(font.render(line, True, color), (x, y + j * lh))
+
+    @staticmethod
+    def _wrap_csv(items, font: pygame.font.Font, max_width: int, max_lines: int = 2):
+        """Empaqueta una lista de ítems en líneas separadas por comas, sin partir
+        un ítem (p. ej. "Bosque ralo") entre líneas. Devuelve ["—"] si está vacía."""
+        if not items:
+            return ["—"]
+        lines: list[list[str]] = []
+        cur: list[str] = []
+        for item in items:
+            trial = ", ".join(cur + [item]) + ","  # con coma: mide el peor caso
+            if not cur or font.size(trial)[0] <= max_width:
+                cur.append(item)
+            else:
+                lines.append(cur)
+                cur = [item]
+        if cur:
+            lines.append(cur)
+        lines = lines[:max_lines]
+        out = []
+        for k, group in enumerate(lines):
+            text = ", ".join(group)
+            if k < len(lines) - 1:
+                text += ","
+            out.append(text)
+        return out
+
+    def _draw_troops(self, surface, game: Game, rect: pygame.Rect) -> int:
         y = self._section_title(surface, "Tipos de tropa", rect.x, rect.y)
         # Cabecera de columnas.
         cols = [
             ("Clase", rect.x + 56),
-            ("Vel", rect.x + 300),
-            ("Atq", rect.x + 370),
-            ("Def", rect.x + 440),
-            ("Brilla en", rect.x + 520),
+            ("Vel", rect.x + 265),
+            ("Atq", rect.x + 315),
+            ("Def", rect.x + 365),
+            ("Brilla en", rect.x + 415),
             ("Vence a", rect.x + 690),
         ]
         head = pygame.Rect(rect.x, y, rect.width, 30)
@@ -183,13 +234,20 @@ class HelpOverlay:
             ):
                 surface.blit(self.font.render(str(value), True, theme.TEXT), (cx + 6, y + 8))
 
-            surface.blit(
-                self.small_font.render(self._best_terrain(unit), True, (150, 210, 150)),
-                (cols[4][1], y + 6),
+            # "Brilla en" / "Vence a": envueltos a máx. 2 líneas (sin partir un
+            # nombre) para que no se desborden a la columna vecina (el partisano
+            # brilla en varios terrenos).
+            brilla_w = cols[5][1] - cols[4][1] - 8
+            vence_w = (rect.x + rect.width) - cols[5][1] - 8
+            self._blit_lines(
+                surface,
+                self._wrap_csv(self._best_terrain(unit), self.small_font, brilla_w),
+                self.small_font, (150, 210, 150), cols[4][1], y + 6,
             )
-            surface.blit(
-                self.small_font.render(self._beats(game, unit), True, (230, 160, 120)),
-                (cols[5][1], y + 6),
+            self._blit_lines(
+                surface,
+                self._wrap_csv(self._beats(game, unit), self.small_font, vence_w),
+                self.small_font, (230, 160, 120), cols[5][1], y + 6,
             )
             # Nota especial (arquero: ignora el bonus de fuerte).
             if unit.ignora_bonus_fort:
@@ -208,6 +266,7 @@ class HelpOverlay:
             True, ACCENT,
         )
         surface.blit(tip, (rect.x, y + 6))
+        return y + 30  # borde inferior de la sección (para apilar "Cómo se gana")
 
     def _draw_map_and_sites(self, surface, game: Game, rect: pygame.Rect) -> int:
         y = self._section_title(surface, "El mapa", rect.x, rect.y)
@@ -229,8 +288,11 @@ class HelpOverlay:
                 if extra:
                     detail += f" — {extra}"
             surface.blit(self.font.render(name, True, theme.TEXT), (rect.x + 52, y + 4))
-            surface.blit(
-                self.small_font.render(detail, True, theme.TEXT_DIM), (rect.x + 200, y + 6)
+            # Detalle envuelto a 2 líneas (bosque ralo y pantano son largos).
+            self._blit_lines(
+                surface,
+                self._wrap(detail, self.small_font, (rect.x + rect.width) - (rect.x + 200) - 8),
+                self.small_font, theme.TEXT_DIM, rect.x + 200, y + 4,
             )
             y += TILE_SPRITE + 8
 
@@ -275,29 +337,32 @@ class HelpOverlay:
             "4. Seleccioná el fuerte y usá «Crear ejército» para sacar tropas de la reserva.",
             "5. Mandá la tropa correcta al terreno correcto y presioná los fuertes del rival.",
             "6. Al chocar, elegí «Dirigir batalla» para pelear en tiempo real, o auto-resolver.",
+            "7. Unir: Shift+clic en dos ejércitos propios adyacentes (transferencia por clase).",
+            "8. Dividir: botón «Dividir ejército» (tecla D) para destacar tropas a uno nuevo.",
         ]
+        # Dos columnas balanceadas: la primera mitad a la izquierda, el resto a
+        # la derecha (robusto a cualquier cantidad de pasos).
         col_w = rect.width // 2
+        per_col = (len(steps) + 1) // 2
         for i, step in enumerate(steps):
-            cx = rect.x + (col_w if i >= 3 else 0)
-            cy = y + (i % 3) * 30
+            cx = rect.x + (i // per_col) * col_w
+            cy = y + (i % per_col) * 30
             surface.blit(self.font.render(step, True, theme.TEXT), (cx, cy))
 
     # --- helpers de datos ----------------------------------------------------
 
-    def _best_terrain(self, unit) -> str:
+    def _best_terrain(self, unit) -> list[str]:
         """Terrenos donde la clase tiene bonus (>1), por nombre legible."""
-        good = [
+        return [
             TERRAIN_NAMES.get(Terrain(t), t)
             for t, mult in sorted(unit.bonus_terreno.items(), key=lambda kv: -kv[1])
             if mult > 1.0
         ]
-        return ", ".join(good) if good else "—"
 
-    def _beats(self, game: Game, unit) -> str:
+    def _beats(self, game: Game, unit) -> list[str]:
         """Clases contra las que tiene ventaja (bonus_vs > 1), por nombre."""
-        names = [
+        return [
             game.classes[c].nombre if c in game.classes else c
             for c, mult in unit.bonus_vs.items()
             if mult > 1.0
         ]
-        return ", ".join(names) if names else "—"

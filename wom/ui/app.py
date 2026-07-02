@@ -177,20 +177,24 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
 
         if isinstance(current, MenuScreen):
             action = current.take_action()
+            next_screen: MenuScreen | GameScreen | MultiplayerScreen | None = None
             if action == "quit":
                 running = False
             elif action == "multiplayer":
-                current = MultiplayerScreen()
+                next_screen = MultiplayerScreen()
             elif action == "editor":
-                current = EditorScreen()
+                next_screen = EditorScreen()
             elif isinstance(action, NewGameChoice):
-                current = GameScreen(new_game(action), human_id=HUMAN_ID, music=music)
+                next_screen = GameScreen(new_game(action), human_id=HUMAN_ID, music=music)
             elif isinstance(action, ScenarioChoice):
-                current = scenario_game(action, music=music)
+                next_screen = scenario_game(action, music=music)
             elif isinstance(action, LoadChoice):
-                current = GameScreen(
+                next_screen = GameScreen(
                     load_game(action.path), human_id=HUMAN_ID, music=music
                 )
+            if next_screen is not None:
+                current.close()  # corta el video de portada (ffmpeg + hilo)
+                current = next_screen
         elif isinstance(current, MultiplayerScreen):
             current.update()  # conduce la red (lobby) una vez por frame
             if current.net_start is not None:
@@ -222,4 +226,6 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
         pygame.display.flip()
         clock.tick(theme.FPS)
 
+    if isinstance(current, MenuScreen):
+        current.close()  # corta el video de portada si se salió desde el menú
     pygame.quit()
