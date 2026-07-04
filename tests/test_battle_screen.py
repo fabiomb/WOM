@@ -217,3 +217,42 @@ def test_batalla_corre_hasta_terminar_y_da_resultado(screen):
     # Un clic cierra el resumen.
     bs.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"pos": (10, 10), "button": 1}))
     assert bs.done
+
+
+def test_unit_frames_flip_espeja_y_cachea(screen):
+    """`unit_frames(..., flip=True)` devuelve los frames espejados y cachea por
+    orientación (el sprite base mira a la derecha)."""
+    from wom.ui.assets import unit_frames
+
+    normal = unit_frames("soldado", "walk", 48, flip=False)
+    flipped = unit_frames("soldado", "walk", 48, flip=True)
+    assert normal and len(flipped) == len(normal)
+    # Espejo real: al menos un frame difiere de su versión sin espejar.
+    assert any(
+        pygame.image.tobytes(f, "RGBA") != pygame.image.tobytes(n, "RGBA")
+        for f, n in zip(flipped, normal)
+    )
+    # Cacheado: segunda llamada devuelve exactamente las mismas superficies.
+    assert unit_frames("soldado", "walk", 48, flip=True) is flipped
+
+
+def test_soldado_encara_al_rival(screen):
+    """El atacante (izquierda) mira a la derecha; el defensor (derecha) a la izq."""
+    battle = _battle()
+    bs = BattleScreen(battle, human_owner=0)
+    bs.phase = "fighting"
+    bs._update_anim(0.05)
+    facings = {u.owner: bs._unit_anim[u.id]["facing"]
+               for u in battle.units if u.class_id == "soldado" and u.id in bs._unit_anim}
+    assert facings[battle.attacker_owner] == 1
+    assert facings[battle.defender_owner] == -1
+
+
+def test_encare_por_bando_en_la_formacion_inicial(screen):
+    """En preparación (sin simular aún) el defensor ya se dibuja espejado: la
+    orientación por bando aplica antes de que arranque `_update_anim`."""
+    battle = _battle()
+    bs = BattleScreen(battle, human_owner=0)  # fase de preparación, sin pasos
+    assert not bs._unit_anim  # todavía no hay estado de animación
+    assert bs._default_facing(battle.attacker_owner) == 1
+    assert bs._default_facing(battle.defender_owner) == -1

@@ -266,18 +266,24 @@ class BattleScreen:
             return self._sprite(u.class_id, depth)
         size = max(10, int(self.cell * SPRITE_SCALE * depth))
         st = self._unit_anim.get(u.id)
+        # El sprite mira a la derecha por defecto. Antes de que `_update_anim`
+        # arranque (formación / fase de preparación) todavía no hay estado: se
+        # usa la orientación por bando (defensor a la izquierda → espejado), así
+        # las tropas ya se encaran mientras esperan el comienzo del combate.
+        facing = st.get("facing", 1) if st is not None else self._default_facing(u.owner)
+        flip = facing < 0
         if st is not None:
             if st.get("attack_t") is not None:
-                frames = unit_frames(u.class_id, "attack", size)
+                frames = unit_frames(u.class_id, "attack", size, flip=flip)
                 if frames:
                     return frames[oneshot_frame(st["attack_t"], len(frames), ATTACK_SECONDS)]
             if st.get("moving"):
-                frames = unit_frames(u.class_id, "walk", size)
+                frames = unit_frames(u.class_id, "walk", size, flip=flip)
                 if frames:
                     return frames[loop_frame(
                         self.battle.elapsed, len(frames), phase=st.get("phase", 0.0)
                     )]
-        frames = unit_frames(u.class_id, "idle", size)
+        frames = unit_frames(u.class_id, "idle", size, flip=flip)
         return frames[0] if frames else self._sprite(u.class_id, depth)
 
     def _draw_dying(self, surface: pygame.Surface) -> None:
@@ -286,7 +292,7 @@ class BattleScreen:
         for d in self._dying:
             depth = self._depth(d["y"])
             size = max(10, int(self.cell * SPRITE_SCALE * depth))
-            frames = unit_frames(d["class_id"], "death", size)
+            frames = unit_frames(d["class_id"], "death", size, flip=d.get("flip", False))
             if not frames:
                 continue
             sprite = frames[min(d["frame"], len(frames) - 1)]
@@ -503,6 +509,12 @@ class BattleScreen:
             arrow["t"] += dt
         self._arrows = [a for a in self._arrows if a["t"] < a["dur"]]
 
+    def _default_facing(self, owner: int) -> int:
+        """Orientación inicial de un bando: el atacante (desplegado a la
+        izquierda) mira a la derecha (+1, sin espejar); el defensor (derecha)
+        mira a la izquierda (-1, espejado)."""
+        return 1 if owner == self.battle.attacker_owner else -1
+
     def _update_anim(self, dt: float) -> None:
         """Deriva el estado de animación de cada ficha (marcha/ataque/muerte).
 
@@ -526,6 +538,7 @@ class BattleScreen:
                 st = self._unit_anim[u.id] = {
                     "attack_t": None, "prev": (u.x, u.y),
                     "phase": (u.id % 11) * 0.11, "moving": False,
+                    "facing": self._default_facing(u.owner),
                 }
             if u.id in attackers:
                 st["attack_t"] = 0.0  # (re)arranca la secuencia de ataque
@@ -534,7 +547,14 @@ class BattleScreen:
                 if st["attack_t"] >= ATTACK_SECONDS:
                     st["attack_t"] = None
             px, py = st["prev"]
-            st["moving"] = math.hypot(u.x - px, u.y - py) / dt > 0.4
+            dx = u.x - px
+            st["moving"] = math.hypot(dx, u.y - py) / dt > 0.4
+            # Encara hacia donde avanza (con histéresis: solo cambia con un
+            # desplazamiento horizontal claro, para no titilar por el jitter).
+            if dx > 0.02:
+                st["facing"] = 1
+            elif dx < -0.02:
+                st["facing"] = -1
             st["prev"] = (u.x, u.y)
         # Muertes: fichas animadas que estaban vivas y ahora tienen vida 0.
         for uid in list(self._unit_anim):
@@ -550,6 +570,7 @@ class BattleScreen:
                     self._dying.append({
                         "class_id": u.class_id, "x": u.x, "y": u.y,
                         "t": 0.0, "frame": pick_frame(uid, n),
+                        "flip": st.get("facing", 1) < 0,
                     })
         for d in self._dying:
             d["t"] += dt

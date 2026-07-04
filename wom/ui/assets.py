@@ -43,6 +43,16 @@ UNIT_ANIMATIONS: dict[str, dict[str, list[str]]] = {
         ],
         "death": ["soldado/soldado-muerto-1", "soldado/soldado-muerto-2"],
     },
+    "caballero": {
+        "idle": ["caballero/caballero"],
+        "walk": ["caballero/caballero-caminando-1", "caballero/caballero-caminando-2"],
+        "attack": [
+            "caballero/caballero-atacando-1",
+            "caballero/caballero-atacando-2",
+            "caballero/caballero-atacando-3",
+        ],
+        "death": ["caballero/caballero-muerto-1", "caballero/caballero-muerto-2"],
+    },
 }
 
 # Lados/esquinas de las máscaras de borde (autotiling de terreno seco). Se
@@ -191,9 +201,9 @@ def _load(name: str, size: int, *, smooth: bool = False) -> pygame.Surface:
     return surface
 
 
-# Cache de frames de animación por (clase, estado, tamaño). Se hornea una vez
-# por tamaño (nivel de zoom / profundidad), como el resto de los sprites.
-_frame_cache: dict[tuple[str, str, int], list[pygame.Surface]] = {}
+# Cache de frames de animación por (clase, estado, tamaño, flip). Se hornea una
+# vez por tamaño (nivel de zoom / profundidad), como el resto de los sprites.
+_frame_cache: dict[tuple[str, str, int, bool], list[pygame.Surface]] = {}
 
 
 def has_unit_animation(class_id: str) -> bool:
@@ -207,16 +217,25 @@ def unit_frame_count(class_id: str, state: str) -> int:
     return len(anim[state]) if anim is not None and state in anim else 0
 
 
-def unit_frames(class_id: str, state: str, size: int) -> list[pygame.Surface]:
+def unit_frames(
+    class_id: str, state: str, size: int, *, flip: bool = False
+) -> list[pygame.Surface]:
     """Frames de un estado de animación (idle/walk/attack/death) escalados a
-    `size`. Lista vacía si la clase no anima o el estado no existe."""
+    `size`. `flip` los espeja horizontalmente (el sprite mira a la derecha por
+    defecto; se espeja para el bando que encara hacia la izquierda). Lista vacía
+    si la clase no anima o el estado no existe. Todo cacheado por (clase, estado,
+    tamaño, flip)."""
     anim = UNIT_ANIMATIONS.get(class_id)
     if anim is None or state not in anim:
         return []
-    key = (class_id, state, size)
+    key = (class_id, state, size, flip)
     frames = _frame_cache.get(key)
     if frames is None:
-        frames = [_load(name, size, smooth=True) for name in anim[state]]
+        if flip:
+            base = unit_frames(class_id, state, size, flip=False)
+            frames = [pygame.transform.flip(f, True, False) for f in base]
+        else:
+            frames = [_load(name, size, smooth=True) for name in anim[state]]
         _frame_cache[key] = frames
     return frames
 

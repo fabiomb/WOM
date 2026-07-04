@@ -506,20 +506,22 @@ class MapRenderer:
         moving: bool = False,
         anim_time: float = 0.0,
         anim_seed: int = 0,
+        face_left: bool = False,
     ) -> pygame.Rect:
         """Dibuja un ejército en una posición de tile, entera o fraccionaria
         (la animación de movimiento interpola entre tiles).
 
         Si la clase dominante tiene animación, usa la **pose** quieto y el
         **ciclo de caminata** mientras se mueve (`moving`, durante el recap de
-        fin de turno); `anim_seed` desfasa el ciclo por ejército."""
+        fin de turno); `anim_seed` desfasa el ciclo por ejército y `face_left`
+        espeja el sprite cuando marcha hacia la izquierda."""
         ts = self.tile_size
         rect = pygame.Rect(
             round(self.origin[0] + tile_pos[0] * ts),
             round(self.origin[1] + tile_pos[1] * ts),
             ts, ts,
         )
-        sprite = self._army_sprite(class_id, moving, anim_time, anim_seed)
+        sprite = self._army_sprite(class_id, moving, anim_time, anim_seed, face_left)
         surface.blit(sprite, sprite.get_rect(center=rect.center))
         pygame.draw.rect(surface, theme.player_color(owner), rect, 2)
         count = self.count_font.render(str(troops), True, theme.TEXT)
@@ -530,12 +532,15 @@ class MapRenderer:
         return rect
 
     def _army_sprite(
-        self, class_id: str, moving: bool, anim_time: float, anim_seed: int
+        self, class_id: str, moving: bool, anim_time: float, anim_seed: int,
+        face_left: bool = False,
     ) -> pygame.Surface:
         """Sprite del ejército: pose/caminata si la clase anima, si no el estático."""
         if has_unit_animation(class_id):
             state = "walk" if moving else "idle"
-            frames = unit_frames(class_id, state, self.assets.unit_size)
+            # Solo se espeja mientras marcha (quieto no tiene orientación).
+            flip = face_left and moving
+            frames = unit_frames(class_id, state, self.assets.unit_size, flip=flip)
             if frames:
                 if state == "walk":
                     idx = loop_frame(anim_time, len(frames), phase=(anim_seed % 7) * 0.13)
