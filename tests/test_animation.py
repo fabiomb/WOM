@@ -239,3 +239,49 @@ def test_build_turn_animation_conserva_a_los_muertos():
     by_id = {m.army_id: m for m in anim.motions}
     assert not by_id[weak.id].alive
     assert by_id[weak.id].troops == 1  # con su composición pre-turno
+
+
+# --- selección de frame de sprites animados (soldado) ---------------------
+
+from wom.ui.animation import (
+    ATTACK_SECONDS,
+    DEATH_SECONDS,
+    WALK_FPS,
+    loop_frame,
+    oneshot_frame,
+    pick_frame,
+)
+
+
+def test_loop_frame_cicla_y_respeta_fps():
+    n = 2
+    assert loop_frame(0.0, n, fps=WALK_FPS) == 0
+    # A WALK_FPS cuadros/seg, medio período cae en el frame 1.
+    assert loop_frame(1.0 / WALK_FPS, n, fps=WALK_FPS) == 1
+    assert loop_frame(2.0 / WALK_FPS, n, fps=WALK_FPS) == 0  # dio la vuelta
+    # 1 frame nunca cambia; el phase desfasa pero sigue en rango.
+    assert loop_frame(5.0, 1) == 0
+    assert 0 <= loop_frame(3.3, 4, phase=0.7) < 4
+
+
+def test_oneshot_frame_avanza_una_vez_y_mantiene_el_ultimo():
+    n = 3
+    assert oneshot_frame(0.0, n, ATTACK_SECONDS) == 0
+    assert oneshot_frame(ATTACK_SECONDS * 0.5, n, ATTACK_SECONDS) == 1
+    # Al final (o pasado) se queda en el último frame, no se sale de rango.
+    assert oneshot_frame(ATTACK_SECONDS, n, ATTACK_SECONDS) == n - 1
+    assert oneshot_frame(ATTACK_SECONDS * 5, n, ATTACK_SECONDS) == n - 1
+    assert oneshot_frame(0.1, 1, ATTACK_SECONDS) == 0  # 1 frame
+
+
+def test_pick_frame_es_determinista_por_seed():
+    assert pick_frame(0, 2) == 0
+    assert pick_frame(1, 2) == 1
+    assert pick_frame(2, 2) == 0
+    assert pick_frame(999, 1) == 0  # 1 frame → siempre 0
+    # Mismo seed, mismo resultado (nunca usa RNG del juego).
+    assert pick_frame(7, 2) == pick_frame(7, 2)
+
+
+def test_constantes_de_tiempo_positivas():
+    assert WALK_FPS > 0 and ATTACK_SECONDS > 0 and DEATH_SECONDS > 0

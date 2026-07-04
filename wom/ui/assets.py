@@ -29,6 +29,22 @@ ICON_IDS = (
 )
 FALLBACK_COLOR = (200, 0, 200)
 
+# Sprites de animación por clase (subcarpetas de data/assets/). Cada estado es
+# una lista de frames; una clase sin entrada usa su sprite estático (`units`).
+# Por ahora solo el soldado; las demás clases caen al PNG único de siempre.
+UNIT_ANIMATIONS: dict[str, dict[str, list[str]]] = {
+    "soldado": {
+        "idle": ["soldado/soldado"],
+        "walk": ["soldado/soldado-caminando-1", "soldado/soldado-caminando-2"],
+        "attack": [
+            "soldado/soldado-atacando-1",
+            "soldado/soldado-atacando-2",
+            "soldado/soldado-atacando-3",
+        ],
+        "death": ["soldado/soldado-muerto-1", "soldado/soldado-muerto-2"],
+    },
+}
+
 # Lados/esquinas de las máscaras de borde (autotiling de terreno seco). Se
 # derivan por rotación/espejo de dos máscaras base (edge_mask, corner_mask).
 EDGE_SIDES = ("n", "s", "e", "w")
@@ -41,6 +57,7 @@ class Assets:
     def __init__(self, tile_size: int):
         self.tile_size = tile_size
         unit_size = max(8, int(tile_size * 0.72))
+        self.unit_size = unit_size  # tamaño de los sprites de unidad (para animar)
         icon_size = max(8, int(tile_size * 0.8))
         # Terreno seco: sepia + variantes de estilo (orientación/brillo) por
         # tile. `terrain` guarda la base sepia (paleta, fallback); `terrain_styles`
@@ -151,16 +168,57 @@ def _edge_masks(size: int) -> dict[str, pygame.Surface]:
     return masks
 
 
-def _load(name: str, size: int) -> pygame.Surface:
+def _scale(image: pygame.Surface, size: int, smooth: bool) -> pygame.Surface:
+    """Escala a `size`×`size`. `smooth` usa smoothscale (mejor para reducir arte
+    de alta resolución), con caída a scale si el formato no lo permite."""
+    if smooth:
+        try:
+            return pygame.transform.smoothscale(image, (size, size))
+        except (ValueError, pygame.error):
+            pass
+    return pygame.transform.scale(image, (size, size))
+
+
+def _load(name: str, size: int, *, smooth: bool = False) -> pygame.Surface:
     path = ASSETS_DIR / f"{name}.png"
     if path.exists():
         image = pygame.image.load(str(path))
         if pygame.display.get_surface() is not None:
             image = image.convert_alpha()
-        return pygame.transform.scale(image, (size, size))
+        return _scale(image, size, smooth)
     surface = pygame.Surface((size, size))
     surface.fill(FALLBACK_COLOR)
     return surface
+
+
+# Cache de frames de animación por (clase, estado, tamaño). Se hornea una vez
+# por tamaño (nivel de zoom / profundidad), como el resto de los sprites.
+_frame_cache: dict[tuple[str, str, int], list[pygame.Surface]] = {}
+
+
+def has_unit_animation(class_id: str) -> bool:
+    """La clase tiene sprites de animación (si no, se usa el sprite estático)."""
+    return class_id in UNIT_ANIMATIONS
+
+
+def unit_frame_count(class_id: str, state: str) -> int:
+    """Cantidad de frames de un estado (sin cargarlos): para elegir una pose."""
+    anim = UNIT_ANIMATIONS.get(class_id)
+    return len(anim[state]) if anim is not None and state in anim else 0
+
+
+def unit_frames(class_id: str, state: str, size: int) -> list[pygame.Surface]:
+    """Frames de un estado de animación (idle/walk/attack/death) escalados a
+    `size`. Lista vacía si la clase no anima o el estado no existe."""
+    anim = UNIT_ANIMATIONS.get(class_id)
+    if anim is None or state not in anim:
+        return []
+    key = (class_id, state, size)
+    frames = _frame_cache.get(key)
+    if frames is None:
+        frames = [_load(name, size, smooth=True) for name in anim[state]]
+        _frame_cache[key] = frames
+    return frames
 
 
 def _load_mask(name: str, size: int) -> pygame.Surface:

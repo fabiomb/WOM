@@ -51,6 +51,40 @@ SPAWN_RING_MAX_RADIUS = 2.2
 FloatCoord = tuple[float, float]
 
 
+# --- animación de sprites por frames (soldado y futuras clases) -----------
+# Elegir el frame es matemática pura (se testea sin pygame); el dibujo vive en
+# renderer.py / battle_screen.py. Los tiempos por defecto:
+WALK_FPS = 6.0          # cuadros por segundo del ciclo de caminata (loop)
+ATTACK_SECONDS = 0.42   # duración de la secuencia de ataque (one-shot)
+DEATH_SECONDS = 1.1     # cuánto se muestra la pose de muerte antes de desaparecer
+
+
+def loop_frame(elapsed: float, n_frames: int, *, fps: float = WALK_FPS,
+               phase: float = 0.0) -> int:
+    """Índice de un ciclo que loopea (caminata): avanza a `fps` y da la vuelta.
+    `phase` desfasa el ciclo (para que no marchen todos igual)."""
+    if n_frames <= 1:
+        return 0
+    return int((elapsed + phase) * fps) % n_frames
+
+
+def oneshot_frame(t: float, n_frames: int, duration: float) -> int:
+    """Índice de una secuencia que se reproduce una vez en `duration` y mantiene
+    el último cuadro (ataque). `t` es el tiempo desde que arrancó."""
+    if n_frames <= 1 or duration <= 0:
+        return 0
+    return max(0, min(n_frames - 1, int((t / duration) * n_frames)))
+
+
+def pick_frame(seed: int, n_frames: int) -> int:
+    """Elige un cuadro de forma determinista por `seed` (p. ej. la muerte, que
+    usa una pose al azar por unidad). Determinista a propósito: nunca usa el RNG
+    del juego, así la simulación sigue siendo reproducible."""
+    if n_frames <= 1:
+        return 0
+    return seed % n_frames
+
+
 def spawn_highlight_rings(elapsed_seconds: float) -> list[tuple[float, float]]:
     """Anillos (radio en tiles, opacidad 0..1) del resaltado inicial.
 

@@ -36,7 +36,20 @@ from wom.core import formations
 from wom.core.battle import BattleOutcome, BattleResult
 from wom.core.tactical import TacticalBattle, Unit
 from wom.ui import scale, theme
-from wom.ui.assets import load_image, load_scaled
+from wom.ui.animation import (
+    ATTACK_SECONDS,
+    DEATH_SECONDS,
+    loop_frame,
+    oneshot_frame,
+    pick_frame,
+)
+from wom.ui.assets import (
+    has_unit_animation,
+    load_image,
+    load_scaled,
+    unit_frame_count,
+    unit_frames,
+)
 
 # Fondo del campo abierto (cielo+montañas arriba, pradera abajo). El campo de
 # juego se ubica en la pradera (debajo del horizonte). Solo campo abierto; el
@@ -128,6 +141,12 @@ class BattleScreen:
         self.result: BattleResult | None = None
         self._last_ticks: int | None = None
         self._sprite_cache: dict[tuple[str, int], pygame.Surface] = {}
+        # Estado de animación por ficha (para las clases con sprites animados,
+        # p. ej. el soldado): detección de marcha/ataque y desfase del ciclo.
+        # `_dying` guarda las fichas que están reproduciendo su muerte (viven
+        # solo en el render, ya no en el modelo).
+        self._unit_anim: dict[int, dict] = {}
+        self._dying: list[dict] = []
         # Fondo según el escenario: pradera (campo abierto) o fuerte (con
         # muralla+puerta dibujadas). Se carga una vez y se escala al área en
         # _layout; con fondo, el campo se ubica en el terreno (debajo del
@@ -239,6 +258,45 @@ class BattleScreen:
         if key not in self._sprite_cache:
             self._sprite_cache[key] = load_scaled(class_id, size)
         return self._sprite_cache[key]
+
+    def _unit_sprite(self, u: Unit, depth: float) -> pygame.Surface:
+        """Sprite de una ficha: frame de animación (pose/marcha/ataque) si su
+        clase anima, o el sprite estático de siempre para el resto."""
+        if not has_unit_animation(u.class_id):
+            return self._sprite(u.class_id, depth)
+        size = max(10, int(self.cell * SPRITE_SCALE * depth))
+        st = self._unit_anim.get(u.id)
+        if st is not None:
+            if st.get("attack_t") is not None:
+                frames = unit_frames(u.class_id, "attack", size)
+                if frames:
+                    return frames[oneshot_frame(st["attack_t"], len(frames), ATTACK_SECONDS)]
+            if st.get("moving"):
+                frames = unit_frames(u.class_id, "walk", size)
+                if frames:
+                    return frames[loop_frame(
+                        self.battle.elapsed, len(frames), phase=st.get("phase", 0.0)
+                    )]
+        frames = unit_frames(u.class_id, "idle", size)
+        return frames[0] if frames else self._sprite(u.class_id, depth)
+
+    def _draw_dying(self, surface: pygame.Surface) -> None:
+        """Fichas reproduciendo su pose de muerte (ya fuera del modelo), que se
+        desvanecen en el último tramo."""
+        for d in self._dying:
+            depth = self._depth(d["y"])
+            size = max(10, int(self.cell * SPRITE_SCALE * depth))
+            frames = unit_frames(d["class_id"], "death", size)
+            if not frames:
+                continue
+            sprite = frames[min(d["frame"], len(frames) - 1)]
+            fade_start = DEATH_SECONDS * 0.6
+            if d["t"] > fade_start:
+                frac = 1.0 - (d["t"] - fade_start) / (DEATH_SECONDS - fade_start)
+                sprite = sprite.copy()
+                sprite.set_alpha(max(0, int(255 * frac)))
+            px, py = self.to_px(d["x"], d["y"])
+            surface.blit(sprite, sprite.get_rect(center=(px, py)))
 
     # --- input -----------------------------------------------------------
     def handle_event(self, event: pygame.event.Event) -> None:
@@ -399,6 +457,7 @@ class BattleScreen:
         self.battle.step(dt)
         self._spawn_arrows()
         self._age_arrows(dt)
+        self._update_anim(dt)
         self.selected = {uid for uid in self.selected if self._alive(uid)}
         if self.battle.finished and self.result is None:
             self.result = self.battle.to_battle_result()
@@ -422,6 +481,7 @@ class BattleScreen:
                     {"from": (seg[0], seg[1]), "to": (seg[2], seg[3]), "t": 0.0, "dur": 0.22}
                 )
         self._age_arrows(dt)
+        self._update_anim(dt)
         self.selected = {uid for uid in self.selected if self._alive(uid)}
 
     def _spawn_arrows(self) -> None:
@@ -443,6 +503,58 @@ class BattleScreen:
             arrow["t"] += dt
         self._arrows = [a for a in self._arrows if a["t"] < a["dur"]]
 
+    def _update_anim(self, dt: float) -> None:
+        """Deriva el estado de animación de cada ficha (marcha/ataque/muerte).
+
+        Solo lee lo que ya existe en el modelo — no lo toca. El ataque usa
+        `attack_events` (poblado cuando este nodo simula: single-player o host);
+        el cliente en red ve marcha/muerte pero no el golpe (no simula). La
+        marcha sale de la velocidad de la ficha; la muerte, de que dejó de estar
+        activa con vida 0. Las fichas muertas pasan a `_dying` para reproducir su
+        pose un rato más (ya no están en el modelo)."""
+        dt = max(dt, 1e-3)
+        attackers = {a for a, _ in self.battle.attack_events}
+        live_ids: set[int] = set()
+        for u in self.battle.units:
+            if not u.active:
+                continue
+            live_ids.add(u.id)
+            if not has_unit_animation(u.class_id):
+                continue
+            st = self._unit_anim.get(u.id)
+            if st is None:
+                st = self._unit_anim[u.id] = {
+                    "attack_t": None, "prev": (u.x, u.y),
+                    "phase": (u.id % 11) * 0.11, "moving": False,
+                }
+            if u.id in attackers:
+                st["attack_t"] = 0.0  # (re)arranca la secuencia de ataque
+            elif st["attack_t"] is not None:
+                st["attack_t"] += dt
+                if st["attack_t"] >= ATTACK_SECONDS:
+                    st["attack_t"] = None
+            px, py = st["prev"]
+            st["moving"] = math.hypot(u.x - px, u.y - py) / dt > 0.4
+            st["prev"] = (u.x, u.y)
+        # Muertes: fichas animadas que estaban vivas y ahora tienen vida 0.
+        for uid in list(self._unit_anim):
+            if uid in live_ids:
+                continue
+            st = self._unit_anim.pop(uid)
+            if st.get("dead_spawned"):
+                continue
+            u = self.battle.unit_by_id(uid)
+            if u is not None and u.hp <= 0:
+                n = unit_frame_count(u.class_id, "death")
+                if n > 0:
+                    self._dying.append({
+                        "class_id": u.class_id, "x": u.x, "y": u.y,
+                        "t": 0.0, "frame": pick_frame(uid, n),
+                    })
+        for d in self._dying:
+            d["t"] += dt
+        self._dying = [d for d in self._dying if d["t"] < DEATH_SECONDS]
+
     def _alive(self, uid: int) -> bool:
         u = self.battle.unit_by_id(uid)
         return u is not None and u.active
@@ -453,6 +565,7 @@ class BattleScreen:
             self._layout(surface.get_size())
         self._draw_field(surface)
         self._draw_walls(surface)
+        self._draw_dying(surface)  # cadáveres debajo de las fichas vivas
         self._draw_units(surface)
         self._draw_arrows(surface)
         self._draw_drag_box(surface)
@@ -512,7 +625,7 @@ class BattleScreen:
             # Disco translúcido y claro (deja ver la pradera por la transparencia
             # del sprite) + sprite + anillo opaco del dueño para leer el bando.
             self._blit_disc(surface, px, py, r, _lighten(color))
-            sprite = self._sprite(u.class_id, depth)
+            sprite = self._unit_sprite(u, depth)
             surface.blit(sprite, sprite.get_rect(center=(px, py)))
             pygame.draw.circle(surface, color, (px, py), r, ring)
             if u.id in self.selected:

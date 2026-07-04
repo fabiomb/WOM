@@ -915,8 +915,12 @@ class GameScreen:
         )
         if animating:
             for motion, pos in self.animation.positions(elapsed):
+                # `moving` activa el ciclo de caminata mientras el ejército
+                # avanza (el waypoint cambió respecto de su tile de partida).
+                moving = tuple(pos) != tuple(motion.waypoints[0])
                 self.renderer.draw_army_at(
-                    surface, motion.owner, motion.class_id, motion.troops, pos
+                    surface, motion.owner, motion.class_id, motion.troops, pos,
+                    moving=moving, anim_time=elapsed, anim_seed=motion.army_id,
                 )
             for point, intensity in self.animation.clash_effects(elapsed):
                 self.renderer.draw_clash(surface, point, intensity)

@@ -8,7 +8,8 @@ from wom.core.army import Army
 from wom.core.game import Game
 from wom.core.worldmap import Coord, Terrain
 from wom.ui import texture, theme
-from wom.ui.assets import Assets, load_image
+from wom.ui.animation import loop_frame
+from wom.ui.assets import Assets, has_unit_animation, load_image, unit_frames
 from wom.ui.camera import Camera
 from wom.ui.pathline import arrow_head, smooth_path, trim_tail
 from wom.ui.tiling import (
@@ -501,16 +502,24 @@ class MapRenderer:
         class_id: str,
         troops: int,
         tile_pos: tuple[float, float],
+        *,
+        moving: bool = False,
+        anim_time: float = 0.0,
+        anim_seed: int = 0,
     ) -> pygame.Rect:
         """Dibuja un ejército en una posición de tile, entera o fraccionaria
-        (la animación de movimiento interpola entre tiles)."""
+        (la animación de movimiento interpola entre tiles).
+
+        Si la clase dominante tiene animación, usa la **pose** quieto y el
+        **ciclo de caminata** mientras se mueve (`moving`, durante el recap de
+        fin de turno); `anim_seed` desfasa el ciclo por ejército."""
         ts = self.tile_size
         rect = pygame.Rect(
             round(self.origin[0] + tile_pos[0] * ts),
             round(self.origin[1] + tile_pos[1] * ts),
             ts, ts,
         )
-        sprite = self.assets.units[class_id]
+        sprite = self._army_sprite(class_id, moving, anim_time, anim_seed)
         surface.blit(sprite, sprite.get_rect(center=rect.center))
         pygame.draw.rect(surface, theme.player_color(owner), rect, 2)
         count = self.count_font.render(str(troops), True, theme.TEXT)
@@ -519,3 +528,18 @@ class MapRenderer:
         surface.blit(shadow, (pos[0] + 1, pos[1] + 1))
         surface.blit(count, pos)
         return rect
+
+    def _army_sprite(
+        self, class_id: str, moving: bool, anim_time: float, anim_seed: int
+    ) -> pygame.Surface:
+        """Sprite del ejército: pose/caminata si la clase anima, si no el estático."""
+        if has_unit_animation(class_id):
+            state = "walk" if moving else "idle"
+            frames = unit_frames(class_id, state, self.assets.unit_size)
+            if frames:
+                if state == "walk":
+                    idx = loop_frame(anim_time, len(frames), phase=(anim_seed % 7) * 0.13)
+                else:
+                    idx = 0
+                return frames[idx]
+        return self.assets.units[class_id]
