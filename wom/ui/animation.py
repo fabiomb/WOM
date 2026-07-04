@@ -57,7 +57,7 @@ FloatCoord = tuple[float, float]
 WALK_FPS = 6.0          # cuadros por segundo del ciclo de caminata (loop)
 ATTACK_SECONDS = 0.42   # duración de la secuencia de ataque (one-shot)
 # El cuerpo de un caído se ve durante DEATH_SECONDS y se desvanece de forma
-# lineal (opacidad -25%/seg → invisible a los 4s), así se notan los caídos
+# lineal (opacidad plena al caer → 0 al cumplirse), así se notan los caídos
 # durante la batalla sin quedar para siempre.
 DEATH_SECONDS = 6.0
 

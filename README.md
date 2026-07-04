@@ -20,11 +20,18 @@ producen tropas, pueblos que dan comida y batallas autoresueltas. Hecho en
   jugador crea o reabastece un ejército.
 - **Batallas autoresueltas** al intentar entrar al tile de un enemigo: poder
   por composición, terreno, comida y experiencia; el perdedor se retira.
-- **Zoom de batalla en tiempo real** (opcional, partida individual): al chocar,
-  el juego pregunta si dirigís el combate o lo auto-resuelve. Si lo dirigís,
-  elegís una **formación de despliegue** (línea, clásica, compacta o en V) en la
-  cuenta regresiva y das órdenes a tus tropas en vivo (mover, atacar, aguantar)
-  en un mini-RTS, en campo abierto o asaltando un fuerte con su muralla y puerta.
+- **Zoom de batalla en tiempo real** (opcional): al chocar, el juego pregunta si
+  dirigís el combate o lo auto-resuelve. Si lo dirigís, elegís una **formación de
+  despliegue** (línea, clásica, compacta o en V) en la cuenta regresiva y das
+  órdenes a tus tropas en vivo (mover, atacar, aguantar) en un mini-RTS, en campo
+  abierto o asaltando un fuerte con su muralla y puerta. También funciona **en
+  multijugador** (LAN y servidor), habilitable por partida: siempre, o solo si
+  todos los jugadores del combate aceptan dirigirlo (si no, se auto-resuelve).
+- **Tropas animadas**: cada clase (partisano, soldado, caballero, arquero) tiene
+  animación de pose, marcha, ataque y caída, con los soldados encarándose entre
+  sí, tanto en el mapa (pose y caminata) como en el zoom de batalla (ciclo
+  completo, con cuerpos que se desvanecen). Las clases sin arte propio usan su
+  sprite estático.
 - **Tres niveles de IA** (fácil / medio / difícil) sobre un mismo motor de
   scoring de objetivos, balanceados por simulación masiva.
 - **Tres modos de victoria**: conquista total, captura de banderas o límite de
@@ -52,8 +59,9 @@ producen tropas, pueblos que dan comida y batallas autoresueltas. Hecho en
 ## Multijugador (red local)
 
 Desde **Multijugador** en el menú: un jugador **crea** la partida (elige modo de
-victoria, tamaño de mapa, turnos máximos, tiempo por turno y puerto) y el otro
-se **conecta** por IP. Ambos quedan en una sala de espera hasta marcar «Listo».
+victoria, tamaño de mapa, turnos máximos, tiempo por turno, **zoom de batalla**
+—off / acordado / siempre— y puerto) y el otro se **conecta** por IP. Ambos
+quedan en una sala de espera hasta marcar «Listo».
 
 | Crear partida | Partida en red con chat |
 | --- | --- |
@@ -206,6 +214,14 @@ Los sprites viven en [`data/assets/`](data/assets/): tiles de terreno de
 El arte se reemplaza por archivos del mismo nombre y tamaño; los placeholders
 originales se conservan con prefijo `_` y se regeneran con
 `tools/gen_placeholders.py`.
+
+Las **animaciones de tropa** viven en una subcarpeta por clase
+(`data/assets/<clase>/`) con la pose (`<clase>.png`), la caminata
+(`<clase>-caminando-1/2`), el ataque (`<clase>-atacando-1/2/3`) y la caída
+(`<clase>-muerto-1/2`); el sprite mira a la derecha (el juego lo espeja según el
+bando). Agregar una clase a la animación es sumar su carpeta y una entrada en
+`UNIT_ANIMATIONS` (`wom/ui/assets.py`); sin carpeta, la clase usa su sprite
+estático.
 
 ## Tests y herramientas
 
