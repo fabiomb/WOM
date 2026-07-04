@@ -1,3 +1,3 @@
 """WOM — Juego de estrategia militar por turnos."""
 
-__version__ = "0.7.6"
+__version__ = "0.8.0"

@@ -53,6 +53,26 @@ UNIT_ANIMATIONS: dict[str, dict[str, list[str]]] = {
         ],
         "death": ["caballero/caballero-muerto-1", "caballero/caballero-muerto-2"],
     },
+    "partisano": {
+        "idle": ["partisano/partisano"],
+        "walk": ["partisano/partisano-caminando-1", "partisano/partisano-caminando-2"],
+        "attack": [
+            "partisano/partisano-atacando-1",
+            "partisano/partisano-atacando-2",
+            "partisano/partisano-atacando-3",
+        ],
+        "death": ["partisano/partisano-muerto-1", "partisano/partisano-muerto-2"],
+    },
+    "arquero": {
+        "idle": ["arquero/arquero"],
+        "walk": ["arquero/arquero-caminando-1", "arquero/arquero-caminando-2"],
+        "attack": [
+            "arquero/arquero-atacando-1",
+            "arquero/arquero-atacando-2",
+            "arquero/arquero-atacando-3",
+        ],
+        "death": ["arquero/arquero-muerto-1", "arquero/arquero-muerto-2"],
+    },
 }
 
 # Lados/esquinas de las máscaras de borde (autotiling de terreno seco). Se

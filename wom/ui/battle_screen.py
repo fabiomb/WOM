@@ -296,11 +296,10 @@ class BattleScreen:
             if not frames:
                 continue
             sprite = frames[min(d["frame"], len(frames) - 1)]
-            fade_start = DEATH_SECONDS * 0.6
-            if d["t"] > fade_start:
-                frac = 1.0 - (d["t"] - fade_start) / (DEATH_SECONDS - fade_start)
-                sprite = sprite.copy()
-                sprite.set_alpha(max(0, int(255 * frac)))
+            # Desvanecido lineal desde el instante de la muerte (25%/seg).
+            frac = max(0.0, 1.0 - d["t"] / DEATH_SECONDS)
+            sprite = sprite.copy()
+            sprite.set_alpha(int(255 * frac))
             px, py = self.to_px(d["x"], d["y"])
             surface.blit(sprite, sprite.get_rect(center=(px, py)))
 

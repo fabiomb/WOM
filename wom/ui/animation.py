@@ -56,7 +56,10 @@ FloatCoord = tuple[float, float]
 # renderer.py / battle_screen.py. Los tiempos por defecto:
 WALK_FPS = 6.0          # cuadros por segundo del ciclo de caminata (loop)
 ATTACK_SECONDS = 0.42   # duración de la secuencia de ataque (one-shot)
-DEATH_SECONDS = 1.1     # cuánto se muestra la pose de muerte antes de desaparecer
+# El cuerpo de un caído se ve durante DEATH_SECONDS y se desvanece de forma
+# lineal (opacidad -25%/seg → invisible a los 4s), así se notan los caídos
+# durante la batalla sin quedar para siempre.
+DEATH_SECONDS = 6.0
 
 
 def loop_frame(elapsed: float, n_frames: int, *, fps: float = WALK_FPS,
