@@ -44,6 +44,62 @@ def _fort_battle():
     )
 
 
+class _RecSound:
+    """Doble del SoundPlayer que registra los disparos (para los tests)."""
+
+    def __init__(self):
+        self.events: list = []
+        self.loop: str | None = None
+        self.stops = 0
+
+    def play(self, event):
+        self.events.append(event)
+
+    def play_throttled(self, event, cooldown_ms=350):
+        self.events.append(event)
+
+    def play_attack(self, class_id):
+        self.events.append(("attack", class_id))
+
+    def start_loop(self, event):
+        self.loop = event
+
+    def stop_loop(self):
+        self.stops += 1
+        self.loop = None
+
+
+def test_ambientacion_marcha_luego_fragor(screen):
+    snd = _RecSound()
+    bs = BattleScreen(_battle(), human_owner=0, sound=snd)
+    bs.phase = "fighting"
+    bs._update_sounds()                 # sin contacto aún → marcha
+    assert snd.loop == "march"
+    bs.battle.elapsed = 3.0             # pasado el umbral → fragor de batalla
+    bs._update_sounds()
+    assert snd.loop == "battle"
+
+
+def test_muerte_dispara_quejido(screen):
+    snd = _RecSound()
+    bs = BattleScreen(_battle(), human_owner=0, sound=snd)
+    bs.phase = "fighting"
+    bs.battle.elapsed = 3.0
+    bs._update_sounds()                 # fija el conteo de fichas activas
+    snd.events.clear()
+    bs.battle.units[0].hp = 0           # una ficha cae
+    bs._update_sounds()
+    assert "death" in snd.events
+
+
+def test_planificacion_no_hace_ruido(screen):
+    snd = _RecSound()
+    bs = BattleScreen(_battle(), human_owner=0, sound=snd)
+    assert bs.phase == "planning"
+    bs._update_sounds()                 # en preparación no suena nada
+    assert snd.loop is None and snd.events == []
+
+
 def test_campo_abierto_usa_fondo_y_profundidad(screen):
     bs = BattleScreen(_battle(), human_owner=0)
     assert bs.has_bg  # campo abierto: carga el fondo de pradera

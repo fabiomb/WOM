@@ -108,10 +108,16 @@ class BattleScreen:
 
     def __init__(
         self, battle: TacticalBattle, human_owner: int, enemy_level: str | None = None,
-        *, net=None, participant: bool = True,
+        *, net=None, participant: bool = True, sound=None,
     ):
         self.battle = battle
         self.human_owner = human_owner
+        # Efectos de sonido (opcional): fragor de batalla + golpes + muertes.
+        self.sound = sound
+        # Fichas activas el frame anterior (para detectar muertes puntuales) y
+        # si ya hubo contacto (marcha → fragor de batalla).
+        self._sfx_prev_active = {u.id for u in battle.units if u.active}
+        self._sfx_contact = False
         # En red el modelo lo simula la autoridad (NetGame/MatchRunner): esta
         # pantalla solo renderiza y enruta el input. `participant` distingue al
         # jugador que da órdenes del espectador (mira, sin input).
@@ -463,9 +469,12 @@ class BattleScreen:
         self._spawn_arrows()
         self._age_arrows(dt)
         self._update_anim(dt)
+        self._update_sounds()
         self.selected = {uid for uid in self.selected if self._alive(uid)}
         if self.battle.finished and self.result is None:
             self.result = self.battle.to_battle_result()
+            if self.sound is not None:
+                self.sound.stop_loop()  # se acabó el combate: corta el fragor
 
     def _update_net(self, dt: float) -> None:
         """En red la autoridad simula: solo seguimos su fase/cuenta y animamos.
@@ -487,7 +496,33 @@ class BattleScreen:
                 )
         self._age_arrows(dt)
         self._update_anim(dt)
+        self._update_sounds()
         self.selected = {uid for uid in self.selected if self._alive(uid)}
+
+    def _update_sounds(self) -> None:
+        """Coordina los efectos con lo que pasa en la batalla (solo presentación).
+
+        Marcha mientras las tropas se acercan; fragor de batalla desde el primer
+        contacto (o pasados unos segundos, para el cliente en red que no recibe
+        `attack_events`); un golpe por clase que ataca y un quejido por cada
+        ficha que cae, ambos con cooldown para no saturar."""
+        if self.sound is None or self.phase != "fighting":
+            return
+        b = self.battle
+        # Ambientación: marcha → fragor de batalla al primer contacto.
+        if not self._sfx_contact and (b.attack_events or b.elapsed > 2.0):
+            self._sfx_contact = True
+        self.sound.start_loop("battle" if self._sfx_contact else "march")
+        # Golpes: un efecto por clase atacante de este step (cooldown por clase).
+        for attacker_id, _target_id in b.attack_events:
+            atk = b.unit_by_id(attacker_id)
+            if atk is not None:
+                self.sound.play_attack(atk.class_id)
+        # Muertes: fichas que estaban activas y ya no lo están.
+        active = {u.id for u in b.units if u.active}
+        if len(active) < len(self._sfx_prev_active):
+            self.sound.play_throttled("death", 250)
+        self._sfx_prev_active = active
 
     def _spawn_arrows(self) -> None:
         """Crea una flecha por cada ataque de arquero de este step (visual)."""

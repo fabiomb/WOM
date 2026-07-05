@@ -106,8 +106,10 @@ class MenuScreen:
         default_ai_level: str = "medio",
         default_seed: int | None = None,
         music: MusicPlayer | None = None,
+        sound=None,
     ):
         self.music = music  # None en tests sin audio: Opciones queda inerte
+        self.sound = sound  # efectos de sonido (SFX); None en tests sin audio
         self._editing_folder: str | None = None  # buffer mientras se escribe
         self.mode = "main"
         self.action: NewGameChoice | LoadChoice | ScenarioChoice | str | None = None
@@ -303,6 +305,11 @@ class MenuScreen:
             self._editing_folder = settings.music_folder
         elif hit == "music_order":
             self.music.set_shuffle(not settings.music_shuffle)
+        elif hit == "sfx_toggle" and self.sound is not None:
+            self.sound.set_enabled(not settings.sfx_enabled)
+        elif hit == "sfx_volume" and self.sound is not None:
+            new = settings.sfx_volume + 0.1
+            self.sound.set_volume(0.0 if new > 1.001 else new)
 
     def _click_video(self, hit: str) -> None:
         if hit == "back":
@@ -560,10 +567,12 @@ class MenuScreen:
             folder_label = f"Carpeta:  {settings.music_folder}"
         rows = (
             ("music_toggle", f"Música:  {'sí' if settings.music_enabled else 'no'}"),
-            ("music_volume", f"Volumen:  {round(settings.music_volume * 100)}%"),
+            ("music_volume", f"Volumen música:  {round(settings.music_volume * 100)}%"),
             ("music_folder", folder_label),
             ("music_order",
              f"Orden:  {'aleatorio' if settings.music_shuffle else 'secuencial'}"),
+            ("sfx_toggle", f"Efectos:  {'sí' if settings.sfx_enabled else 'no'}"),
+            ("sfx_volume", f"Volumen efectos:  {round(settings.sfx_volume * 100)}%"),
         )
         hint = (
             "(escribí la ruta y Enter)" if self._editing_folder is not None

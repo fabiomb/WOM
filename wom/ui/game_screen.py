@@ -84,6 +84,7 @@ class GameScreen:
         turn_seconds: int = 0,
         intro: ScenarioIntroOverlay | None = None,
         music=None,
+        sound=None,
     ):
         self.game = game
         self.human_id = human_id
@@ -91,6 +92,11 @@ class GameScreen:
         # Reproductor de música (opcional): se agacha mientras suena el clip de
         # fin de partida y se restaura cuando termina.
         self.music = music
+        # Efectos de sonido (opcional): fragor de la batalla (zoom) y marcha de
+        # tropas durante la animación de recap. Independiente de la música.
+        self.sound = sound
+        self._map_march_on = False  # loop de marcha del recap sonando
+        self._clash_sound_on = False  # fragor del choque del recap sonando
         # Intro del escenario: modal con título/descripción/imagen sobre el
         # mapa al empezar (None en partidas normales). Se cierra con un clic.
         self.scenario_intro = intro
@@ -495,6 +501,11 @@ class GameScreen:
         self.hud.close_result_video()  # corta el clip de fin de partida (ffmpeg/audio)
         if self.music is not None:
             self.music.unduck()  # restaura el volumen si se salió durante el clip
+        if self.sound is not None:
+            self.sound.stop_loop()  # corta cualquier ambientación (marcha/batalla)
+            self.sound.fade_ambient(0)  # y el fragor del choque, si sonaba
+            self._map_march_on = False
+            self._clash_sound_on = False
         if self.net is not None:
             if isinstance(self.net.session, ServerSession) and not self.net.disconnected:
                 self.net.session.leave_match()
@@ -754,6 +765,7 @@ class GameScreen:
         self._tactical_battle = BattleScreen(
             battle, human_owner=self.human_id,
             enemy_level=self._enemy_ai_level(enemy_owner),
+            sound=self.sound,
         )
         self._tactical_active = (attacker_id, defender_id)
 
@@ -786,6 +798,8 @@ class GameScreen:
         if not present:
             if self._tactical_battle is not None:
                 self._tactical_battle = None
+                if self.sound is not None:
+                    self.sound.stop_loop()  # se cerró la batalla: corta el fragor
             self._net_battle_id = None
             return
         phase = self.net.battle_phase()
@@ -795,6 +809,7 @@ class GameScreen:
                 self._tactical_battle = BattleScreen(
                     target, human_owner=self.human_id, net=self.net,
                     participant=self.net.battle_is_participant(),
+                    sound=self.sound,
                 )
 
     def _net_voting(self) -> bool:
@@ -829,6 +844,7 @@ class GameScreen:
         táctico si hay uno activo; en red conduce el lockstep y dispara la
         animación de cada turno; sin red ni batalla, no hace nada."""
         self._update_result_audio()  # agacha la música mientras suena el clip de fin
+        self._update_map_march_sound()  # marcha de tropas durante la animación de recap
         if self.net is None:
             # Single-player: la pantalla de batalla conduce su propia simulación.
             if self._tactical_battle is not None:
@@ -876,6 +892,39 @@ class GameScreen:
             self.music.duck()
         else:
             self.music.unduck()
+
+    def _update_map_march_sound(self) -> None:
+        """Marcha de tropas (loop) mientras corre la fase de marcha del recap.
+
+        Arranca al empezar la animación del turno y se corta al llegar al choque
+        (o al terminar); si hubo batallas, suelta un golpe de fragor al chocar.
+        No-op sin reproductor o durante el zoom de batalla (que tiene su audio)."""
+        if self.sound is None or self._tactical_battle is not None:
+            return
+        anim = self.animation
+        animating = self.animating
+        in_march = (
+            anim is not None
+            and animating
+            and anim.move_duration > 0.0
+            and self._animation_elapsed() < anim.move_duration
+        )
+        if in_march and not self._map_march_on:
+            self.sound.start_loop("map_march")
+            self._map_march_on = True
+        elif not in_march and self._map_march_on:
+            # Fundido de ~1 s: el avance de tropas no se corta de golpe (además
+            # cubre el retardo natural hasta la próxima orden del jugador).
+            self.sound.stop_loop(fade_ms=1000)
+            self._map_march_on = False
+            if anim is not None and anim.clash_points and animating:
+                self.sound.play_ambient("battle")  # el choque del recap
+                self._clash_sound_on = True
+        # El fragor del choque (mp3 más largo que la animación) se desvanece
+        # unos instantes después de terminar el recap, en vez de sonar de más.
+        if self._clash_sound_on and not animating:
+            self.sound.fade_ambient(1500)
+            self._clash_sound_on = False
 
     def _update_turn_timer(self) -> None:
         """Reloj de turno: cuenta solo mientras el humano puede dar órdenes; al

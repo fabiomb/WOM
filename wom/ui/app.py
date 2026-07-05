@@ -31,6 +31,7 @@ from wom.ui.menu_screen import (
 from wom.ui.multiplayer_screen import MultiplayerScreen
 from wom.ui.server_browser_screen import ServerBrowserScreen
 from wom.ui.music import MusicPlayer
+from wom.ui.sound import SoundPlayer
 from wom.ui.scenario_intro_overlay import ScenarioIntroOverlay
 from wom.ui.music_overlay import MusicOverlay
 from wom.ui.video import apply_video_settings, parse_resolution
@@ -91,15 +92,17 @@ def _players_for_map(doc, ai_levels: tuple[str, ...]) -> list[Player]:
     return players
 
 
-def scenario_game(choice: ScenarioChoice, music=None) -> GameScreen:
+def scenario_game(choice: ScenarioChoice, music=None, sound=None) -> GameScreen:
     """Arranca un escenario completo: honra la IA y la victoria del `.wom` y
     muestra su intro (título/descripción/imagen) sobre el mapa al empezar."""
     doc = load_scenario(choice.path)
     intro = ScenarioIntroOverlay(doc.title, doc.description, doc.image_bytes)
-    return GameScreen(build_game(doc), human_id=HUMAN_ID, intro=intro, music=music)
+    return GameScreen(
+        build_game(doc), human_id=HUMAN_ID, intro=intro, music=music, sound=sound
+    )
 
 
-def _start_net_game(net_start, music=None) -> GameScreen:
+def _start_net_game(net_start, music=None, sound=None) -> GameScreen:
     """Arranca la partida en red a partir del lobby (NetGameStart).
 
     El host recibe un `ai_factory`: si un rival se cae, la IA lo controla hasta
@@ -130,6 +133,7 @@ def _start_net_game(net_start, music=None) -> GameScreen:
         net=net,
         turn_seconds=net_start.rules.turn_seconds,
         music=music,
+        sound=sound,
     )
 
 
@@ -150,9 +154,12 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
     music = MusicPlayer(settings=settings)
     music.start()  # un tema al azar desde el arranque (si está habilitada)
     music_overlay = MusicOverlay(music)
+    # Efectos de sonido: comparten el mismo `settings` que la música, así el
+    # menú de Opciones guarda ambos sin pisarse (una sola instancia de Settings).
+    sound = SoundPlayer(settings=settings)
 
     current: MenuScreen | GameScreen | MultiplayerScreen = MenuScreen(
-        ai_level, seed, music=music
+        ai_level, seed, music=music, sound=sound
     )
     running = True
     while running:
@@ -185,12 +192,14 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
             elif action == "editor":
                 next_screen = EditorScreen()
             elif isinstance(action, NewGameChoice):
-                next_screen = GameScreen(new_game(action), human_id=HUMAN_ID, music=music)
+                next_screen = GameScreen(
+                    new_game(action), human_id=HUMAN_ID, music=music, sound=sound
+                )
             elif isinstance(action, ScenarioChoice):
-                next_screen = scenario_game(action, music=music)
+                next_screen = scenario_game(action, music=music, sound=sound)
             elif isinstance(action, LoadChoice):
                 next_screen = GameScreen(
-                    load_game(action.path), human_id=HUMAN_ID, music=music
+                    load_game(action.path), human_id=HUMAN_ID, music=music, sound=sound
                 )
             if next_screen is not None:
                 current.close()  # corta el video de portada (ffmpeg + hilo)
@@ -198,27 +207,27 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
         elif isinstance(current, MultiplayerScreen):
             current.update()  # conduce la red (lobby) una vez por frame
             if current.net_start is not None:
-                current = _start_net_game(current.net_start, music=music)
+                current = _start_net_game(current.net_start, music=music, sound=sound)
             elif current.wants_internet:
                 current = ServerBrowserScreen()
             elif current.wants_menu:
-                current = MenuScreen(ai_level, seed, music=music)
+                current = MenuScreen(ai_level, seed, music=music, sound=sound)
         elif isinstance(current, ServerBrowserScreen):
             current.update()  # conduce la sesión con el servidor dedicado
             if current.net_start is not None:
-                current = _start_net_game(current.net_start, music=music)
+                current = _start_net_game(current.net_start, music=music, sound=sound)
             elif current.wants_menu:
-                current = MenuScreen(ai_level, seed, music=music)
+                current = MenuScreen(ai_level, seed, music=music, sound=sound)
         elif isinstance(current, EditorScreen):
             if current.wants_menu:
-                current = MenuScreen(ai_level, seed, music=music)
+                current = MenuScreen(ai_level, seed, music=music, sound=sound)
         else:  # GameScreen
             current.update()  # conduce el lockstep en red (no-op sin red)
             if getattr(current, "wants_lobby", False) and current.net is not None:
                 # Partida del servidor dedicado: vuelve al lobby con la sesión viva.
                 current = ServerBrowserScreen(session=current.net.session)
             elif current.wants_menu:
-                current = MenuScreen(ai_level, seed, music=music)
+                current = MenuScreen(ai_level, seed, music=music, sound=sound)
 
         current.draw(canvas)
         music_overlay.draw(canvas)

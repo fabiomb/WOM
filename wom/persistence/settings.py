@@ -24,6 +24,11 @@ class Settings:
     music_volume: float = 0.7  # 0.0 a 1.0
     music_folder: str = DEFAULT_MUSIC_FOLDER  # relativa a la raíz o absoluta
     music_shuffle: bool = True  # False = secuencial
+    # Efectos de sonido (SFX): sonido ambiente de la batalla y del movimiento
+    # de tropas. Independientes de la música (usan canales del mixer, no el
+    # streaming de `mixer.music`), con su propio interruptor y volumen.
+    sfx_enabled: bool = True
+    sfx_volume: float = 0.7  # 0.0 a 1.0
     video_resolution: str = "1920x1080"  # tamaño físico de la ventana
     video_maximized: bool = False  # arrancar maximizado
     # Multijugador por Internet: nombre del jugador y servidores guardados
