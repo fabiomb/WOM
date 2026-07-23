@@ -134,6 +134,7 @@ def _start_net_game(net_start, music=None, sound=None) -> GameScreen:
         turn_seconds=net_start.rules.turn_seconds,
         music=music,
         sound=sound,
+        llm_runner=getattr(net_start, "llm_runner", None),
     )
 
 
@@ -188,7 +189,9 @@ def run(seed: int | None = None, ai_level: str = "medio") -> None:
             if action == "quit":
                 running = False
             elif action == "multiplayer":
-                next_screen = MultiplayerScreen()
+                # Comparte la instancia de Settings de la app: guardar la
+                # config del LLM no pisa música/sonido ni viceversa.
+                next_screen = MultiplayerScreen(settings=settings)
             elif action == "editor":
                 next_screen = EditorScreen()
             elif isinstance(action, NewGameChoice):

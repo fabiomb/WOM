@@ -14,9 +14,10 @@ import pygame
 import pytest
 
 from wom.net.session import SessionState
+from wom.persistence.settings import Settings, load_settings
 from wom.ui import theme
 from wom.ui.menu_screen import MenuScreen
-from wom.ui.multiplayer_screen import MultiplayerScreen
+from wom.ui.multiplayer_screen import MultiplayerScreen, TextField
 
 
 @pytest.fixture(scope="module")
@@ -48,8 +49,8 @@ def test_menu_tiene_opcion_multijugador(screen):
 
 
 def test_draw_todos_los_modos_sin_romper(screen):
-    mp = MultiplayerScreen()
-    for mode in ("hub", "create", "connect"):
+    mp = MultiplayerScreen(settings=Settings())
+    for mode in ("hub", "create", "connect", "llm_create", "llm_config"):
         mp.mode = mode
         mp.draw(screen)  # no debe lanzar
 
@@ -235,6 +236,123 @@ def test_chat_de_la_sala(screen):
     finally:
         host._teardown()
         client._teardown()
+
+
+# --- rival LLM --------------------------------------------------------------
+
+
+def test_hub_tiene_seccion_llm(screen):
+    mp = MultiplayerScreen(settings=Settings())
+    mp.draw(screen)
+    mp.handle_event(
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN, {"pos": mp._buttons["to_llm_create"].center, "button": 1}
+        )
+    )
+    assert mp.mode == "llm_create"
+    mp.mode = "hub"
+    mp.draw(screen)
+    mp._activate("to_llm_config")
+    assert mp.mode == "llm_config"
+
+
+def test_pegar_con_ctrl_v(screen, monkeypatch):
+    import wom.ui.multiplayer_screen as mps
+
+    monkeypatch.setattr(mps, "clipboard_get", lambda: "sk-una-key-larga-1234567890")
+    mp = MultiplayerScreen(settings=Settings())
+    mp.mode = "llm_config"
+    mp.draw(screen)  # registra los rects de los campos
+    mp.handle_event(
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN, {"pos": mp._fields["llm_apikey"].center, "button": 1}
+        )
+    )
+    assert mp.focused == "llm_apikey"
+    mp.f_llm_apikey.value = ""
+    mp.handle_event(
+        pygame.event.Event(
+            pygame.KEYDOWN,
+            {"key": pygame.K_v, "mod": pygame.KMOD_CTRL, "unicode": "\x16"},
+        )
+    )
+    assert mp.f_llm_apikey.value == "sk-una-key-larga-1234567890"
+
+
+def test_pegar_respeta_numeric_y_max_len(monkeypatch):
+    field = TextField("", numeric=True, max_len=4)
+    field.paste("a1b2c3d4e5")
+    assert field.value == "1234"
+    copied = {}
+    import wom.ui.multiplayer_screen as mps
+
+    monkeypatch.setattr(mps, "clipboard_put", lambda t: copied.setdefault("v", t))
+    field.key(
+        pygame.event.Event(
+            pygame.KEYDOWN, {"key": pygame.K_c, "mod": pygame.KMOD_CTRL, "unicode": "\x03"}
+        )
+    )
+    assert copied["v"] == "1234"
+
+
+def test_guardar_config_llm(tmp_path, screen):
+    path = tmp_path / "settings.json"
+    mp = MultiplayerScreen(settings=Settings(), settings_path=path)
+    mp.llm_provider = "anthropic"
+    mp.f_llm_model.value = "claude-fable-5"
+    mp.f_llm_name.value = "Claude"
+    mp.llm_effort = "high"
+    mp.f_llm_apikey.value = "sk-123"
+    mp._activate("llm_save")
+    loaded = load_settings(path)
+    assert loaded.llm_provider == "anthropic"
+    assert loaded.llm_model == "claude-fable-5"
+    assert loaded.llm_name == "Claude"
+    assert loaded.llm_effort == "high"
+    assert loaded.llm_api_key == "sk-123"
+    # La config del backend refleja el formulario (effort → thinking).
+    config = mp._llm_backend_config()
+    assert config.provider == "anthropic" and config.thinking and config.effort == "high"
+
+
+def test_partida_llm_sin_api_key_no_arranca(screen, monkeypatch):
+    """Un proveedor con key obligatoria y sin key configurada frena antes de
+    abrir el server, con el aviso a la vista (si no, el LLM jugaría pasando
+    todos los turnos en silencio)."""
+    for env in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(env, raising=False)
+    mp = MultiplayerScreen(settings=Settings())
+    mp.mode = "llm_create"
+    mp.llm_provider = "gemini"
+    mp.f_llm_apikey.value = ""
+    mp._activate("llm_start")
+    assert mp.mode == "llm_create" and mp.server is None and mp.llm_runner is None
+    assert "API key" in mp.status
+
+
+def test_partida_llm_local_llega_a_started(screen):
+    """Con un proveedor local (ollama, sin key) la partida vs LLM arma el host
+    loopback, el runner se conecta y ambos quedan listos: mode → started con el
+    runner colgado del NetGameStart. (El backend no se llama en el lobby, así
+    que no hace falta un Ollama real.)"""
+    mp = MultiplayerScreen(settings=Settings())
+    mp.mode = "llm_create"
+    mp.llm_provider = "ollama"
+    mp.f_llm_model.value = "gemma3"
+    mp.f_llm_name.value = "Bot"
+    mp._activate("llm_start")
+    assert mp.mode == "waiting" and mp.llm_runner is not None
+    try:
+        assert _pump([mp], lambda: mp.mode == "started"), (
+            f"no arrancó la partida vs LLM (runner: {mp.llm_runner and mp.llm_runner.status})"
+        )
+        assert mp.net_start is not None
+        assert mp.net_start.llm_runner is mp.llm_runner
+        assert mp.net_start.game.players[1].name == "Bot"
+    finally:
+        if mp.llm_runner is not None:
+            mp.llm_runner.stop()
+        mp._teardown()
 
 
 def test_cancelar_vuelve_al_hub(screen):

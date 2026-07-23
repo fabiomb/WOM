@@ -4,10 +4,16 @@ Es una pantalla de nivel superior del loop (como el menú o la partida). Maneja
 toda la red de la fase de lobby para partidas de 2 a `MAX_PLAYERS` jugadores
 (topología estrella, el host es la autoridad):
 
-- **Hub**: crear partida o conectarse.
+- **Hub**: crear partida, conectarse, Internet o jugar contra un LLM.
 - **Crear** (host): nombre + reglas (jugadores, victoria, tamaño de mapa, turnos
   máximos, tiempo por turno, puerto) → "Esperar conexiones" abre el `Server`.
 - **Conectar** (cliente): nombre + IP + puerto → "Conectar".
+- **Jugar contra AI LLM**: `llm_config` edita el backend del rival (proveedor,
+  modelo, nombre, esfuerzo, API key — con Ctrl+V — más "Probar configuración",
+  que llama al modelo en un hilo corto) persistido en settings.json; `llm_create`
+  arma la 1v1: el humano hostea en loopback (puerto 0) y un `LLMRunner` (hilo
+  del mismo proceso) se conecta como cliente de red normal — mismo lockstep y
+  chat que contra una persona — con el lobby en automático.
 - **Sala de espera**: la lista de jugadores (host + rivales) con su estado de
   "listo", el botón "Listo" propio y "Cancelar". Cuando se conectaron todos y
   todos están listos, el host arranca y la pantalla pasa a "listo para jugar".
@@ -20,6 +26,7 @@ de la sesión cada frame. El arranque real de la partida (lockstep) lo hace
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 
 import pygame
@@ -28,7 +35,10 @@ from wom.core.game import Game, Player
 from wom.core.mapgen import MapParams
 from wom.core.victory import VictoryMode
 from wom.core.worldmap import MAX_PLAYERS
+from wom.llm.backend import BackendConfig, LLMError, make_backend
+from wom.llm.runner import LLMRunner, probe_backend
 from wom.net.protocol import GameSetup
+from wom.persistence.settings import Settings, load_settings, save_settings
 from wom.net.rules import (
     MatchRules,
     TACTICAL_AGREE,
@@ -69,6 +79,11 @@ from wom.ui.menu_screen import (
 
 CONNECT_TIMEOUT = 4.0
 
+# Rival LLM: proveedores y niveles de esfuerzo que cicla el formulario de
+# configuración ("" = sin razonamiento extendido; solo aplica a Anthropic).
+LLM_PROVIDERS = ["ollama", "lmstudio", "openai", "gemini", "anthropic"]
+LLM_EFFORTS = ["", "low", "medium", "high", "xhigh", "max"]
+
 # Fondo de las pantallas secundarias: portada con un pergamino ancho a la
 # derecha (data/assets/title-secondary.png). Zona útil del pergamino como
 # fracciones del ancho/alto de la imagen (x0, y0, x1, y1). Si falta el asset, la
@@ -88,10 +103,32 @@ class NetGameStart:
     human_id: int
     rules: MatchRules
     peer_name: str = ""  # lo deriva NetGame de los jugadores si va vacío
+    llm_runner: LLMRunner | None = None  # partida contra un LLM embebido
+
+
+def clipboard_get() -> str:
+    """Texto del portapapeles del sistema, o "" si no hay/no se puede."""
+    try:
+        return pygame.scrap.get_text() or ""
+    except Exception:
+        return ""  # sin display/clipboard (headless): degrada a nada
+
+
+def clipboard_put(text: str) -> None:
+    """Copia `text` al portapapeles del sistema (no-op si no se puede)."""
+    try:
+        pygame.scrap.put_text(text)
+    except Exception:
+        pass
 
 
 class TextField:
-    """Campo de texto editable mínimo (foco + edición por teclado)."""
+    """Campo de texto editable mínimo (foco + edición por teclado).
+
+    Soporta Ctrl+V (pegar), Ctrl+C (copiar) y Ctrl+X (cortar) con el
+    portapapeles del sistema — pensado para las API keys largas del rival LLM,
+    que nadie quiere tipear a mano.
+    """
 
     def __init__(self, value: str = "", numeric: bool = False, max_len: int = 24):
         self.value = value
@@ -99,6 +136,15 @@ class TextField:
         self.max_len = max_len
 
     def key(self, event: pygame.event.Event) -> None:
+        if getattr(event, "mod", 0) & pygame.KMOD_CTRL:
+            if event.key == pygame.K_v:
+                self.paste(clipboard_get())
+            elif event.key == pygame.K_c:
+                clipboard_put(self.value)
+            elif event.key == pygame.K_x:
+                clipboard_put(self.value)
+                self.value = ""
+            return
         if event.key == pygame.K_BACKSPACE:
             self.value = self.value[:-1]
         elif event.unicode and event.unicode.isprintable():
@@ -108,11 +154,27 @@ class TextField:
             if len(self.value) < self.max_len:
                 self.value += ch
 
+    def paste(self, text: str) -> None:
+        """Agrega texto externo con las mismas reglas que el tipeo."""
+        for ch in text:
+            if not ch.isprintable():
+                continue
+            if self.numeric and not ch.isdigit():
+                continue
+            if len(self.value) >= self.max_len:
+                break
+            self.value += ch
+
 
 class MultiplayerScreen:
     """Pantalla de configuración y lobby de partidas en red."""
 
-    def __init__(self, default_name: str = "Jugador"):
+    def __init__(
+        self,
+        default_name: str = "Jugador",
+        settings: Settings | None = None,
+        settings_path=None,
+    ):
         self.mode = "hub"
         self.wants_menu = False
         self.wants_internet = False  # el hub pide abrir el navegador de servidores
@@ -140,6 +202,25 @@ class MultiplayerScreen:
         self.f_connectport = TextField(str(DEFAULT_PORT), numeric=True, max_len=5)
         self.f_chat = TextField("", max_len=120)  # chat de la sala de espera
         self.chat_log: list[tuple[str, str]] = []  # (nombre, texto)
+
+        # Rival LLM: configuración persistida en settings.json (se comparte la
+        # instancia de la app para que guardar no pise otras preferencias).
+        self._settings_path = settings_path
+        self.settings = settings if settings is not None else load_settings(settings_path)
+        self.llm_provider = (
+            self.settings.llm_provider
+            if self.settings.llm_provider in LLM_PROVIDERS
+            else LLM_PROVIDERS[0]
+        )
+        self.llm_effort = (
+            self.settings.llm_effort if self.settings.llm_effort in LLM_EFFORTS else ""
+        )
+        self.f_llm_model = TextField(self.settings.llm_model, max_len=60)
+        self.f_llm_name = TextField(self.settings.llm_name, max_len=24)
+        self.f_llm_apikey = TextField(self.settings.llm_api_key, max_len=300)
+        self.llm_runner: LLMRunner | None = None  # rival embebido (partida vs LLM)
+        self._llm_match = False  # la partida que se está armando es contra el LLM
+        self._probe_thread = None  # test de configuración en curso (hilo)
 
         # Reglas cíclicas (host).
         self.victory_mode = VictoryMode.TOTAL
@@ -171,6 +252,9 @@ class MultiplayerScreen:
             "ip": self.f_ip,
             "connectport": self.f_connectport,
             "chat": self.f_chat,
+            "llm_model": self.f_llm_model,
+            "llm_name": self.f_llm_name,
+            "llm_apikey": self.f_llm_apikey,
         }
 
     # --- red (llamado una vez por frame desde el loop) ---------------------
@@ -182,6 +266,21 @@ class MultiplayerScreen:
         # la partida, para las reconexiones); acá solo se la bombea.
         for event in self.session.update():
             self._on_net_event(event)
+        if self._llm_match:
+            # Contra el LLM no hay sala que mirar: el host se marca listo solo
+            # (el runner también) y la partida arranca apenas conecta.
+            if self.llm_runner is not None and self.llm_runner.error:
+                self.status = f"El rival LLM falló: {self.llm_runner.error}"
+                self._teardown()
+                self.mode = "llm_create"
+                return
+            if (
+                self.session is not None
+                and self.session.state is SessionState.LOBBY
+                and not self.session.local_ready
+            ):
+                self.session.set_ready(True)
+            return
         if self.role == "host" and self.session.state is SessionState.CONNECTING:
             connected = len(self.session.roster()) - 1
             self.status = (
@@ -269,12 +368,18 @@ class MultiplayerScreen:
             game=game,
             human_id=human_id,
             rules=rules,
+            llm_runner=self.llm_runner,
         )
         self.status = "¡Listo! La partida en red comienza."
         self.mode = "started"
 
     def _teardown(self) -> None:
-        """Cierra server/session y vuelve al estado de no conectado."""
+        """Cierra server/session (y el rival LLM embebido, si lo hay) y vuelve
+        al estado de no conectado."""
+        if self.llm_runner is not None:
+            self.llm_runner.stop()
+            self.llm_runner = None
+        self._llm_match = False
         if self.session is not None:
             self.session.cancel("salió del lobby")
             self.session = None
@@ -328,6 +433,22 @@ class MultiplayerScreen:
             self.mode = "connect"
         elif hit == "to_internet":
             self.wants_internet = True
+        elif hit == "to_llm_create":
+            self.mode = "llm_create"
+            self.status = ""
+        elif hit == "to_llm_config":
+            self.mode = "llm_config"
+            self.status = ""
+        elif hit == "llm_provider":
+            self.llm_provider = _next(LLM_PROVIDERS, self.llm_provider)
+        elif hit == "llm_effort":
+            self.llm_effort = _next(LLM_EFFORTS, self.llm_effort)
+        elif hit == "llm_test":
+            self._probe_llm_config()
+        elif hit == "llm_save":
+            self._save_llm_config()
+        elif hit == "llm_start":
+            self._start_llm_game()
         elif hit == "n_players":
             self.n_players = self.n_players % MAX_PLAYERS + 1
             if self.n_players < 2:
@@ -348,8 +469,9 @@ class MultiplayerScreen:
             self._cancel_to_hub()
 
     def _go_back(self) -> None:
-        if self.mode in ("create", "connect"):
+        if self.mode in ("create", "connect", "llm_create", "llm_config"):
             self.mode = "hub"
+            self.status = ""
         elif self.mode == "waiting":
             self._cancel_to_hub()
         elif self.mode == "started":
@@ -386,6 +508,82 @@ class MultiplayerScreen:
         self.mode = "waiting"
         self.status = f"Conectando a {ip}…"
 
+    # --- rival LLM ---------------------------------------------------------
+
+    def _llm_backend_config(self) -> BackendConfig:
+        """Config del backend según el formulario (key vacía → variable de
+        entorno, la resuelve `make_backend`)."""
+        effort = self.llm_effort or None
+        return BackendConfig(
+            provider=self.llm_provider,
+            model=self.f_llm_model.value.strip() or "gemma3",
+            api_key=self.f_llm_apikey.value.strip() or None,
+            thinking=effort is not None,
+            effort=effort,
+        )
+
+    def _save_llm_config(self) -> None:
+        self.settings.llm_provider = self.llm_provider
+        self.settings.llm_model = self.f_llm_model.value.strip()
+        self.settings.llm_name = self.f_llm_name.value.strip() or "LLM"
+        self.settings.llm_effort = self.llm_effort
+        self.settings.llm_api_key = self.f_llm_apikey.value.strip()
+        save_settings(self.settings, self._settings_path)
+        self.status = "Configuración del LLM guardada."
+
+    def _probe_llm_config(self) -> None:
+        """Prueba la configuración con una llamada real, sin congelar la UI
+        (el modelo puede tardar): un hilo corto que deja el resultado en
+        `status`."""
+        if self._probe_thread is not None and self._probe_thread.is_alive():
+            return  # ya hay una prueba en curso
+        config = self._llm_backend_config()
+        self.status = f"Probando {config.provider} / {config.model}…"
+
+        def probe() -> None:
+            try:
+                self.status = f"✓ Funciona: {probe_backend(config)}"
+            except LLMError as exc:
+                self.status = f"✗ Falló: {exc}"
+
+        self._probe_thread = threading.Thread(target=probe, daemon=True)
+        self._probe_thread.start()
+
+    def _start_llm_game(self) -> None:
+        """Arranca la partida 1v1 contra el LLM: el humano hostea en loopback y
+        el runner se conecta como un cliente de red más (mismo lockstep y chat
+        que contra una persona)."""
+        config = self._llm_backend_config()
+        try:
+            make_backend(config)  # valida el proveedor y resuelve la key, sin red
+        except LLMError as exc:
+            self.status = f"Configuración del LLM: {exc}"
+            return
+        if config.provider in ("openai", "gemini", "anthropic") and not config.api_key:
+            # Sin key el backend fallaría recién al primer turno (y el LLM
+            # pasaría todos los turnos en silencio): mejor frenar acá.
+            self.status = "Falta la API key: cargala en «Configurar LLM» (o en el entorno)."
+            return
+        try:
+            # Puerto 0 = uno libre asignado por el SO, solo en loopback.
+            self.server = Server(host="127.0.0.1", port=0, max_clients=1)
+        except OSError as exc:
+            self.status = f"No se pudo abrir el puerto local: {exc}"
+            return
+        self.n_players = 2
+        self.tactical_mode = TACTICAL_OFF  # el LLM no puede dirigir batallas
+        self.session = HostSession(
+            2, self.f_name.value or "Jugador", self._setup_provider, server=self.server
+        )
+        self.role = "host"
+        self._llm_match = True
+        self.llm_runner = LLMRunner(
+            config, name=self.f_llm_name.value.strip() or "LLM", port=self.server.port
+        )
+        self.llm_runner.start()
+        self.mode = "waiting"
+        self.status = "Preparando la partida contra el LLM…"
+
     def _toggle_ready(self) -> None:
         if self.session is None or self.session.state is not SessionState.LOBBY:
             return
@@ -411,6 +609,8 @@ class MultiplayerScreen:
             "hub": self._draw_hub,
             "create": self._draw_create,
             "connect": self._draw_connect,
+            "llm_create": self._draw_llm_create,
+            "llm_config": self._draw_llm_config,
             "waiting": self._draw_waiting,
             "started": self._draw_waiting,
         }[self.mode]
@@ -460,6 +660,10 @@ class MultiplayerScreen:
         cap2 = self.small_font.render("Internet (servidor dedicado)", True, cap_color)
         surface.blit(cap2, cap2.get_rect(midtop=(col.centerx, y + 10)))
         y = self._button(surface, "to_internet", "Jugar por Internet", col, y + 36, bordered=True)
+        cap3 = self.small_font.render("Jugar contra AI LLM", True, cap_color)
+        surface.blit(cap3, cap3.get_rect(midtop=(col.centerx, y + 10)))
+        y = self._button(surface, "to_llm_create", "Jugar contra LLM", col, y + 36, bordered=True)
+        y = self._button(surface, "to_llm_config", "Configurar LLM", col, y, bordered=True)
         self._button(surface, "back", "Volver (ESC)", col, y + 8)
 
     def _draw_create(self, surface: pygame.Surface, area: pygame.Rect) -> None:
@@ -498,6 +702,60 @@ class MultiplayerScreen:
         y = self._field(surface, "ip", "IP del host", self.f_ip, col, y)
         y = self._field(surface, "connectport", "Puerto", self.f_connectport, col, y)
         y = self._button(surface, "connect_start", "Conectar", col, y + 8, bordered=True)
+        self._button(surface, "back", "Volver (ESC)", col, y)
+
+    def _draw_llm_create(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        """Partida 1v1 contra el LLM configurado: las opciones normales de una
+        partida (victoria, mapa, turnos) con el rival fijo."""
+        col = self._col(area, 480)
+        y = col.y + 4
+        rival = self.f_llm_name.value.strip() or "LLM"
+        cap_color = INK_DIM if self._on_scroll else theme.TEXT_DIM
+        cap = self.small_font.render(
+            f"Rival: {rival} ({self.llm_provider} / {self.f_llm_model.value.strip()})",
+            True, cap_color,
+        )
+        surface.blit(cap, cap.get_rect(midtop=(col.centerx, y)))
+        y += 30
+        y = self._field(surface, "name", "Tu nombre", self.f_name, col, y)
+        width, height, _f, _t = MAP_SIZES[self.map_size]
+        y = self._button(
+            surface, "victory",
+            f"Victoria:  {VICTORY_LABELS[self.victory_mode]}", col, y, option=True,
+        )
+        y = self._button(
+            surface, "map_size", f"Mapa:  {self.map_size} ({width}x{height})",
+            col, y, option=True,
+        )
+        y = self._field(surface, "maxturns", "Turnos máximos", self.f_maxturns, col, y)
+        y = self._button(
+            surface, "llm_start", "Comenzar partida", col, y + 6, bordered=True
+        )
+        self._button(surface, "back", "Volver (ESC)", col, y)
+
+    def _draw_llm_config(self, surface: pygame.Surface, area: pygame.Rect) -> None:
+        """Configuración del backend del rival LLM (persistida en settings.json).
+        Los campos de texto aceptan Ctrl+V para pegar (la API key, sobre todo)."""
+        col = self._col(area, 520)
+        y = col.y + 4
+        y = self._button(
+            surface, "llm_provider", f"Proveedor:  {self.llm_provider}", col, y, option=True,
+        )
+        y = self._field(surface, "llm_model", "Modelo", self.f_llm_model, col, y)
+        y = self._field(surface, "llm_name", "Nombre del rival", self.f_llm_name, col, y)
+        effort_label = self.llm_effort or "ninguno"
+        y = self._button(
+            surface, "llm_effort",
+            f"Esfuerzo (razonamiento):  {effort_label}", col, y, option=True,
+        )
+        y = self._field(
+            surface, "llm_apikey", "API key (Ctrl+V pega; vacío = variable de entorno)",
+            self.f_llm_apikey, col, y,
+        )
+        y = self._button(
+            surface, "llm_test", "Probar configuración", col, y + 6, bordered=True
+        )
+        y = self._button(surface, "llm_save", "Guardar", col, y, bordered=True)
         self._button(surface, "back", "Volver (ESC)", col, y)
 
     def _draw_waiting(self, surface: pygame.Surface, area: pygame.Rect) -> None:
@@ -680,6 +938,11 @@ class MultiplayerScreen:
             )
             txt_color = theme.TEXT
         shown = field.value + ("_" if focused else "")
+        # Valores largos (una API key pegada): se muestra la cola, que es lo
+        # que se está editando, en vez de desbordar la caja.
+        max_w = rect.width - 20
+        while len(shown) > 1 and self.font.size(shown)[0] > max_w:
+            shown = shown[1:]
         text = self.font.render(shown, True, txt_color)
         surface.blit(text, (rect.x + 10, rect.y + 3))
         self._fields[fid] = rect

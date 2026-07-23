@@ -252,6 +252,34 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."
 
 ---
 
+## 8b. El rival LLM embebido (`wom/llm/runner.py` + menú del juego)
+
+Desde el menú **Multijugador → Jugar contra AI LLM** el juego arma solo lo que el
+CLI hacía a mano: el humano hostea una partida en **loopback** (`Server` en
+127.0.0.1, puerto 0) y `LLMRunner` — un hilo dentro del propio proceso — se
+conecta como cliente de red normal (`ClientSession` + `NetGame` + `LLMPlayer`).
+No hay ningún camino especial: mismo lockstep, mismo roster, mismo chat que
+contra una persona. El lobby se salta solo (ambos lados se marcan listos) y la
+partida es 1v1 con las opciones normales (victoria, mapa, turnos máximos).
+
+- **Configurar LLM** (persistido en `settings.json`: `llm_provider/model/name/
+  effort/api_key`): proveedor y esfuerzo cíclicos, modelo/nombre/API key como
+  texto — los campos aceptan **Ctrl+V/Ctrl+C** (`pygame.scrap`, con degradación
+  silenciosa sin display) para no tipear keys largas. "Probar configuración"
+  llama a `probe_backend` en un hilo corto (una completion trivial) y muestra
+  ✓/✗ sin congelar la UI. Effort no vacío ⇒ `thinking=True` (solo Anthropic).
+- **Feedback de espera:** mientras el backend genera la movida, el runner expone
+  `thinking_since` y el HUD muestra "«Nombre» está pensando… Xs" en el panel de
+  red — así una respuesta lenta no parece una conexión caída.
+- **Chat:** cuando llega un mensaje del humano, el runner pide al backend una
+  respuesta breve (`chat_reply_prompt`, con las últimas líneas como contexto) y
+  la manda por el chat normal de la partida. El chat nunca toca la simulación.
+- Errores del backend (proveedor sin key, sin conexión) frenan antes de arrancar
+  o bajan la partida con el motivo a la vista; en partida, un fallo puntual del
+  modelo sigue pasando el turno como siempre.
+
+---
+
 ## 9. Tests
 
 Todo headless, sin LLM real ni HTTP salvo donde se indique:
@@ -264,6 +292,13 @@ Todo headless, sin LLM real ni HTTP salvo donde se indique:
   con un backend guionado; reconstruye el juego con `Game.from_dict(setup.state)`
   y juega varios turnos manteniendo la sincronía determinista
   (`host.to_dict() == client.to_dict()` cada turno, sin desync).
+- `tests/test_llm_runner.py` — el **runner embebido** por loopback: lobby
+  automático, un turno en sincronía con estado "pensando" observable, respuesta
+  de chat (y que no se contesta a sí mismo), apagado limpio del hilo.
+- `tests/test_ui_multiplayer.py` — la sección LLM del menú: navegación del hub,
+  Ctrl+V/Ctrl+C (portapapeles falso), guardar la config en `settings.json`,
+  freno sin API key y partida local que llega a `started` con el runner colgado
+  del `NetGameStart`.
 - `tests/test_smoke.py` — extendido: `wom.llm` tampoco importa pygame.
 
 ---

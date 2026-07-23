@@ -252,12 +252,19 @@ class Hud:
         sy = box.top - 6 - len(log) * line_h - 2 * line_h - 6
         if panel.get("disconnected"):
             status, color = "Rival desconectado", (210, 80, 80)
+        elif panel.get("llm_status"):
+            # Rival LLM: "X está pensando… Ns" — feedback de que el modelo
+            # sigue generando la movida, no que se cayó la conexión.
+            status, color = panel["llm_status"], (235, 205, 90)
         elif panel.get("waiting"):
             status, color = "Esperando al rival…", (235, 205, 90)
         else:
             status = f"En partida con {panel.get('peer_name') or 'rival'}"
             color = (120, 200, 120)
-        surface.blit(self.small_font.render(status, True, color), (x, sy))
+        surface.blit(
+            self.small_font.render(self._fit(status, self.small_font, max_w), True, color),
+            (x, sy),
+        )
         seconds = panel.get("seconds_left")
         if seconds is not None:
             timer = f"Tiempo de turno: {seconds}s"

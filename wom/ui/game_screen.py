@@ -85,6 +85,7 @@ class GameScreen:
         intro: ScenarioIntroOverlay | None = None,
         music=None,
         sound=None,
+        llm_runner=None,
     ):
         self.game = game
         self.human_id = human_id
@@ -103,6 +104,9 @@ class GameScreen:
         # Modo red (humano vs humano): el par aporta sus órdenes por la red en
         # vez de la AI, y el turno se resuelve cuando llegan las dos listas.
         self.net = net
+        # Rival LLM embebido (partida vs LLM en loopback): solo para mostrar
+        # "está pensando… Xs" en el HUD y apagar el hilo al salir.
+        self.llm_runner = llm_runner
         # Reloj de turno (0 = sin límite): al vencer, se envían las órdenes que
         # haya. Estado del chat del sidebar (modo red).
         self.turn_seconds = turn_seconds
@@ -506,6 +510,8 @@ class GameScreen:
             self.sound.fade_ambient(0)  # y el fragor del choque, si sonaba
             self._map_march_on = False
             self._clash_sound_on = False
+        if self.llm_runner is not None:
+            self.llm_runner.stop()  # el hilo también termina al ver el Bye
         if self.net is not None:
             if isinstance(self.net.session, ServerSession) and not self.net.disconnected:
                 self.net.session.leave_match()
@@ -1047,7 +1053,21 @@ class GameScreen:
             "peer_name": self.net.peer_name,
             "waiting": self.waiting_peer,
             "disconnected": self.net.disconnected,
+            "llm_status": self._llm_status(),
         }
+
+    def _llm_status(self) -> str | None:
+        """Línea de estado del rival LLM para el HUD: mientras el modelo genera
+        su movida muestra el tiempo transcurrido, para que quede claro que la
+        partida no se colgó (según el modelo puede tardar bastante)."""
+        runner = self.llm_runner
+        if runner is None:
+            return None
+        if runner.thinking:
+            return f"{runner.name} está pensando… {runner.thinking_seconds():.0f}s"
+        if runner.error:
+            return f"{runner.name}: {runner.error}"
+        return None
 
     def _update_camera(self) -> None:
         """Paneo por bordes: con el mouse pegado al borde de la ventana la

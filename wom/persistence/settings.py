@@ -36,6 +36,14 @@ class Settings:
     # servidores (S6) y se persisten como el resto de las preferencias.
     player_name: str = "Jugador"
     servers: list = field(default_factory=list)
+    # Rival LLM (Multijugador → Jugar contra AI LLM): backend configurado desde
+    # el juego. `llm_effort` vacío = sin razonamiento extendido (solo aplica a
+    # Anthropic). La API key se guarda acá (settings.json está gitignoreado).
+    llm_provider: str = "ollama"
+    llm_model: str = "gemma3"
+    llm_name: str = "LLM"
+    llm_effort: str = ""
+    llm_api_key: str = ""
 
 
 def add_server(servers: list, name: str, host: str, port: int) -> list:
