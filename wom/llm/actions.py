@@ -22,6 +22,8 @@ además existencia, adyacencia, alcanzabilidad y cantidades, para no gastar
 
 from __future__ import annotations
 
+import re
+
 from wom.core.game import Game
 from wom.core.orders import (
     CreateArmyOrder,
@@ -38,6 +40,9 @@ from wom.core.worldmap import Coord
 # el nombre exacto). Cada acción mapea a su normalizador.
 _MOVE_TO_KEYS = ("to", "dest", "destination", "tile", "target_tile")
 _TROOPS_KEYS = ("troops", "composition", "detach", "units")
+_ARMY_KEYS = ("army", "army_id", "id", "unit", "ejercito", "ejército")
+_SOURCE_KEYS = ("source", "from", "src", "army", "origen")
+_TARGET_KEYS = ("target", "into", "to", "dest", "destino")
 
 
 def translate_actions(
@@ -89,7 +94,7 @@ def _translate_one(kind: str, raw: dict, game: Game, player_id: int) -> Order | 
 
 
 def _move(raw: dict, game: Game, player_id: int) -> MoveOrder:
-    army = _own_army(raw.get("army"), game, player_id)
+    army = _own_army(_first(raw, _ARMY_KEYS), game, player_id)
     dest = _coord(_first(raw, _MOVE_TO_KEYS), "destino")
     if not game.world.in_bounds(dest):
         raise _Invalid(f"move #{army.id}: destino {dest} fuera del mapa")
@@ -120,8 +125,8 @@ def _create(raw: dict, game: Game, player_id: int) -> CreateArmyOrder:
 
 
 def _merge(raw: dict, game: Game, player_id: int) -> MergeArmyOrder:
-    source = _own_army(raw.get("source"), game, player_id)
-    target = _own_army(raw.get("target"), game, player_id)
+    source = _own_army(_first(raw, _SOURCE_KEYS), game, player_id)
+    target = _own_army(_first(raw, _TARGET_KEYS), game, player_id)
     if source.id == target.id:
         raise _Invalid("merge: origen y destino son el mismo ejército")
     if not _adjacent(source.position, target.position):
@@ -130,7 +135,7 @@ def _merge(raw: dict, game: Game, player_id: int) -> MergeArmyOrder:
 
 
 def _split(raw: dict, game: Game, player_id: int) -> SplitArmyOrder:
-    source = _own_army(raw.get("source"), game, player_id)
+    source = _own_army(_first(raw, _SOURCE_KEYS), game, player_id)
     detach = _troops(_first(raw, _TROOPS_KEYS), game)
     detached = sum(detach.values())
     if detached <= 0:
@@ -152,8 +157,8 @@ def _split(raw: dict, game: Game, player_id: int) -> SplitArmyOrder:
 
 
 def _transfer(raw: dict, game: Game, player_id: int) -> TransferTroopsOrder:
-    source = _own_army(raw.get("source"), game, player_id)
-    target = _own_army(raw.get("target"), game, player_id)
+    source = _own_army(_first(raw, _SOURCE_KEYS), game, player_id)
+    target = _own_army(_first(raw, _TARGET_KEYS), game, player_id)
     if source.id == target.id:
         raise _Invalid("transfer: origen y destino son el mismo ejército")
     if not _adjacent(source.position, target.position):
@@ -177,42 +182,69 @@ def _transfer(raw: dict, game: Game, player_id: int) -> TransferTroopsOrder:
 # --- helpers de validación ------------------------------------------------
 
 
-def _own_army(army_id, game: Game, player_id: int):
-    army_id = _coerce_id(army_id)
-    if army_id is None:
-        raise _Invalid("id de ejército inválido")
-    army = game.army_by_id(army_id)
-    if army is None:
-        raise _Invalid(f"el ejército #{army_id} no existe")
+def _own_army(value, game: Game, player_id: int):
+    """Resuelve la referencia del modelo a un ejército propio.
+
+    Acepta el id como int o string (``7``, ``"7"``, ``"#7"``, ``"ejército 7"``)
+    y también una **posición** ``[x, y]`` (los modelos chicos a veces señalan el
+    tile en vez del id). Los rechazos incluyen la lista de ids propios, que
+    vuelve al modelo como feedback en el turno siguiente.
+    """
+    hint = _own_ids_hint(game, player_id)
+    coord = _maybe_coord(value)
+    if coord is not None:
+        army = game.army_at(coord)
+        if army is None:
+            raise _Invalid(f"no hay ningún ejército en {coord}{hint}")
+    else:
+        army_id = _coerce_id(value)
+        if army_id is None:
+            raise _Invalid(f"id de ejército inválido: {value!r}{hint}")
+        army = game.army_by_id(army_id)
+        if army is None:
+            raise _Invalid(f"el ejército #{army_id} no existe{hint}")
     if army.owner != player_id:
-        raise _Invalid(f"el ejército #{army_id} no es tuyo")
+        raise _Invalid(f"el ejército #{army.id} no es tuyo{hint}")
     return army
 
 
+def _own_ids_hint(game: Game, player_id: int) -> str:
+    ids = sorted(a.id for a in game.armies if a.owner == player_id)
+    listed = ", ".join(f"#{i}" for i in ids) if ids else "ninguno"
+    return f" (tus ejércitos: {listed})"
+
+
 def _coerce_id(value) -> int | None:
-    """Acepta un id como int, o como str tipo ``"#7"``/``"7"`` (los modelos lo
-    copian del prompt, que muestra los ejércitos como ``#id``)."""
+    """Acepta un id como int, o como str con un número adentro (``"7"``,
+    ``"#7"``, ``"ejército 7"`` — los modelos lo copian del prompt, que muestra
+    los ejércitos como ``#id``, o lo envuelven en texto)."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value
     if isinstance(value, str):
+        match = re.search(r"\d+", value)
+        return int(match.group()) if match else None
+    return None
+
+
+def _maybe_coord(value) -> Coord | None:
+    """``[x, y]``/``(x, y)``/``{"x":…, "y":…}`` → coordenada, si no None."""
+    if isinstance(value, dict) and "x" in value and "y" in value:
+        value = [value["x"], value["y"]]
+    if isinstance(value, (list, tuple)) and len(value) == 2:
         try:
-            return int(value.strip().lstrip("#").strip())
-        except ValueError:
+            return (int(value[0]), int(value[1]))
+        except (TypeError, ValueError):
             return None
     return None
 
 
 def _coord(value, what: str) -> Coord:
-    if isinstance(value, dict) and "x" in value and "y" in value:
-        value = [value["x"], value["y"]]
-    if not isinstance(value, (list, tuple)) or len(value) != 2:
+    coord = _maybe_coord(value)
+    if coord is None:
         raise _Invalid(f"{what} inválido: {value!r} (se espera [x, y])")
-    try:
-        return (int(value[0]), int(value[1]))
-    except (TypeError, ValueError):
-        raise _Invalid(f"{what} inválido: {value!r}")
+    return coord
 
 
 def _troops(value, game: Game) -> dict[str, int]:

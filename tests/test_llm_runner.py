@@ -91,6 +91,15 @@ def test_runner_juega_y_chatea_en_loopback():
         assert backend.order_calls >= 1
         assert saw_thinking, "nunca se observó el estado 'pensando'"
 
+        # El log de la consola registró la decisión completa: el prompt que vio
+        # el modelo, la respuesta cruda y el resumen de órdenes.
+        kinds = {k for _ts, k, _t in runner.log_lines}
+        assert {"prompt", "raw", "ok"} <= kinds, f"log incompleto: {kinds}"
+        assert any("pasa el turno" in t for _ts, k, t in runner.log_lines if k == "ok")
+        assert any(
+            "Turno" in t for _ts, k, t in runner.log_lines if k == "prompt"
+        ), "el prompt registrado incluye la observación"
+
         # Chat: el humano saluda, el runner responde por el mismo canal.
         # (Solo net.update() bombea la sesión: si no, se robarían los eventos.)
         net.send_chat("hola bot")
@@ -102,6 +111,10 @@ def test_runner_juega_y_chatea_en_loopback():
             f"el runner no respondió el chat: {net.chat_log}"
         )
         assert backend.chat_calls >= 1
+        # El chat también queda en el log de la consola (entrada y respuesta).
+        chat_lines = [t for _ts, k, t in runner.log_lines if k == "chat"]
+        assert any("hola bot" in t for t in chat_lines)
+        assert any(t.startswith("Bot:") for t in chat_lines)
     finally:
         runner.stop()
         host.cancel()
@@ -132,6 +145,17 @@ def test_runner_no_se_responde_a_si_mismo():
         runner.stop()
         host.cancel()
         server.close()
+
+
+def test_describe_order_resume_cada_tipo():
+    from wom.core.orders import CreateArmyOrder, MoveOrder, SplitArmyOrder
+    from wom.llm.runner import describe_order
+
+    move = describe_order(MoveOrder(3, ((1, 1), (1, 2))))
+    assert "3" in move and "(1, 2)" in move and "2 pasos" in move
+    assert "(4, 5)" in describe_order(CreateArmyOrder((4, 5)))
+    split = describe_order(SplitArmyOrder(7, (("soldado", 4),)))
+    assert "7" in split and "4 soldado" in split
 
 
 def test_chat_reply_prompt_incluye_historia_y_nombre():

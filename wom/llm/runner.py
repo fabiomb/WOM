@@ -43,6 +43,39 @@ from wom.net.transport import connect
 _POLL = 0.05  # segundos entre vueltas del loop cuando no hay nada que hacer
 _CHAT_CONTEXT = 12  # últimas líneas de chat que ve el modelo al responder
 
+# Log en vivo para la consola (F2 en la partida): tope de entradas y de
+# largo de la respuesta cruda del modelo (los razonadores pueden ser larguísimos)
+# y del prompt registrado (la observación completa que vio el modelo).
+MAX_LOG_ENTRIES = 400
+MAX_RAW_CHARS = 1500
+MAX_PROMPT_CHARS = 6000
+
+
+def describe_order(order) -> str:
+    """Una orden del core en una línea legible para el log de la consola."""
+    from wom.core.orders import (
+        CreateArmyOrder,
+        MergeArmyOrder,
+        MoveOrder,
+        SplitArmyOrder,
+        TransferTroopsOrder,
+    )
+
+    if isinstance(order, MoveOrder):
+        dest = order.path[-1] if order.path else "?"
+        return f"mover ejército {order.army_id} → {dest} ({len(order.path)} pasos)"
+    if isinstance(order, CreateArmyOrder):
+        return f"crear ejército en {order.position}"
+    if isinstance(order, MergeArmyOrder):
+        return f"fusionar {order.source_id} en {order.target_id}"
+    if isinstance(order, SplitArmyOrder):
+        troops = ", ".join(f"{n} {c}" for c, n in order.composition)
+        return f"dividir {order.source_id} ({troops})"
+    if isinstance(order, TransferTroopsOrder):
+        troops = ", ".join(f"{n} {c}" for c, n in order.composition)
+        return f"transferir {troops} de {order.source_id} a {order.target_id}"
+    return repr(order)
+
 
 def probe_backend(config: BackendConfig) -> str:
     """Prueba la configuración con una llamada real y mínima al modelo.
@@ -101,6 +134,10 @@ class LLMRunner:
         self.status = "iniciando"
         self.thinking_since: float | None = None  # time.monotonic() al empezar a pensar
         self.error = ""
+        # Log en vivo para la consola (F2): (timestamp, tipo, texto). Tipos:
+        # info | raw (respuesta del modelo) | ok (órdenes) | warn | error | chat.
+        # Lo escribe este hilo y lo lee la UI; con el GIL y append alcanza.
+        self.log_lines: list[tuple[float, str, str]] = []
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run, name="llm-runner", daemon=True
@@ -130,15 +167,26 @@ class LLMRunner:
             return 0.0
         return max(0.0, (now if now is not None else time.monotonic()) - since)
 
+    def log(self, kind: str, text: str) -> None:
+        """Agrega una entrada al log de la consola (con tope de tamaño)."""
+        self.log_lines.append((time.time(), kind, text))
+        del self.log_lines[:-MAX_LOG_ENTRIES]
+
     # --- loop del hilo -----------------------------------------------------
 
     def _run(self) -> None:
         try:
             backend = self._backend if self._backend is not None else make_backend(self.config)
-            player = LLMPlayer(1, backend, debug=self.debug, logger=self._log)
+            # El logger del jugador va al log de la consola: captura los errores
+            # de backend y el "paso el turno" con su motivo.
+            player = LLMPlayer(
+                1, backend, debug=self.debug,
+                logger=lambda msg: self.log("warn", msg),
+            )
         except LLMError as exc:
             self._fail(f"backend: {exc}")
             return
+        self.log("info", f"Backend: {backend.describe()}")
         try:
             conn = connect(self.host, self.port, timeout=5.0)
         except OSError as exc:
@@ -164,6 +212,7 @@ class LLMRunner:
             for event in session.update():
                 if isinstance(event, Connected):
                     self.status = "en la sala"
+                    self.log("info", f"Conectado al host «{event.name}»")
                 elif isinstance(event, Rejected):
                     self._fail(f"rechazado: {event.reason}")
                     return None
@@ -184,22 +233,48 @@ class LLMRunner:
         player.player_id = human_id
         net = NetGame(session, game, human_id=human_id, is_host=False)
         chat_seen = len(net.chat_log)
+        self.log("info", f"Partida iniciada (jugador {human_id})")
         while not self._stop.is_set() and net.phase is not Phase.ENDED:
             net.update()
             if net.phase is Phase.COLLECTING:
                 self.status = "pensando"
+                self.log("info", f"— Turno {net.game.turn}: pensando…")
                 self.thinking_since = time.monotonic()
+                t0 = time.monotonic()
                 try:
                     orders = player.decide_orders(net.game)
                 finally:
                     self.thinking_since = None
                 self.status = "esperando"
+                self._log_decision(player, orders, time.monotonic() - t0)
                 net.submit_local_orders(orders)
             chat_seen = self._answer_chat(net, backend, chat_seen)
             net.consume_resolved()
             time.sleep(_POLL)
         if net.disconnected:
             self.status = f"desconectado: {net.disconnect_reason}"
+            self.log("info", f"Desconectado: {net.disconnect_reason}")
+
+    def _log_decision(self, player: LLMPlayer, orders, seconds: float) -> None:
+        """Vuelca al log el prompt enviado, la respuesta cruda, los descartes
+        y las órdenes."""
+        obs = player.last_observation
+        if len(obs) > MAX_PROMPT_CHARS:
+            obs = obs[:MAX_PROMPT_CHARS] + "…"
+        if obs:
+            self.log("prompt", f"Observación enviada al modelo:\n{obs}")
+        raw = " ".join(player.last_raw.split())
+        if len(raw) > MAX_RAW_CHARS:
+            raw = raw[:MAX_RAW_CHARS] + "…"
+        if raw:
+            self.log("raw", f"Respuesta: {raw}")
+        for warning in player.last_warnings:
+            self.log("warn", f"Descartada: {warning}")
+        if orders:
+            detail = "; ".join(describe_order(o) for o in orders)
+            self.log("ok", f"{len(orders)} órdenes en {seconds:.1f}s: {detail}")
+        else:
+            self.log("ok", f"Sin órdenes en {seconds:.1f}s (pasa el turno)")
 
     def _answer_chat(self, net: NetGame, backend, seen: int) -> int:
         """Responde (una sola vez) a los mensajes nuevos del rival humano."""
@@ -209,21 +284,27 @@ class LLMRunner:
         fresh = log[seen:]
         seen = len(log)
         own = net.game.players[net.human_id].name
+        for who, text in fresh:
+            if who not in (own, self.name):
+                self.log("chat", f"{who}: {text}")
         if not any(who not in (own, self.name, "Sistema") for who, _ in fresh):
             return seen  # solo eco propio o mensajes de sistema: nada que contestar
         system, user = chat_reply_prompt(self.name, list(log))
         try:
             reply = " ".join(backend.complete(system, user).split()).strip()
         except LLMError as exc:
+            self.log("warn", f"chat sin respuesta: {exc}")
             self._log(f"chat sin respuesta: {exc}")
             return len(net.chat_log)
         if reply:
             net.send_chat(reply[:200])
+            self.log("chat", f"{self.name}: {reply[:200]}")
         return len(net.chat_log)
 
     def _fail(self, message: str) -> None:
         self.error = message
         self.status = "error"
+        self.log("error", message)
         self._log(message)
 
     def _log(self, message: str) -> None:

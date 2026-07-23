@@ -274,6 +274,29 @@ partida es 1v1 con las opciones normales (victoria, mapa, turnos máximos).
 - **Chat:** cuando llega un mensaje del humano, el runner pide al backend una
   respuesta breve (`chat_reply_prompt`, con las últimas líneas como contexto) y
   la manda por el chat normal de la partida. El chat nunca toca la simulación.
+- **Consola (F2):** el runner acumula un log en vivo (`log_lines`, con tope): el
+  **prompt** (la observación completa que vio el modelo), respuesta **cruda**
+  (truncada a `MAX_RAW_CHARS`), órdenes traducidas (`describe_order`), acciones
+  descartadas con su motivo, chat y errores. `wom/ui/console_overlay.py` lo
+  muestra en un panel translúcido sobre la partida — F2 abre/cierra, PgUp/PgDn y
+  la rueda desplazan, **P** oculta/muestra los prompts (largos por el mapa
+  ASCII), **Ctrl+C** copia el log al portapapeles; **no es modal** (el juego
+  sigue recibiendo input, salvo mientras se chatea) — para evaluar cada modelo.
+
+### Tolerancia de referencias a ejércitos (modelos chicos)
+
+Los modelos limitados (Gemma3:1b) señalan los ejércitos de forma inconsistente.
+`actions.py` lo absorbe sin descartar:
+
+- **Id en cualquier forma:** `_coerce_id` extrae el primer número de la cadena,
+  así `7`, `"7"`, `"#7"` y `"ejército 7"` valen igual.
+- **Por posición:** si en vez del id mandan la coordenada del tile (`"army":
+  [x, y]`), se resuelve al ejército parado ahí (`_maybe_coord` + `army_at`).
+- **Sinónimos de clave:** `army`/`army_id`/`id`/`unit` para mover;
+  `source`/`from`/`src` y `target`/`into`/`to` para merge/transfer/split.
+- **Feedback correctivo:** cada rechazo lista los ids propios del jugador
+  (`_own_ids_hint`), y `LLMPlayer` reinyecta los descartes del turno anterior al
+  principio del prompt siguiente, para que el modelo corrija formato/ids.
 - Errores del backend (proveedor sin key, sin conexión) frenan antes de arrancar
   o bajan la partida con el motivo a la vista; en partida, un fallo puntual del
   modelo sigue pasando el turno como siempre.
@@ -294,7 +317,12 @@ Todo headless, sin LLM real ni HTTP salvo donde se indique:
   (`host.to_dict() == client.to_dict()` cada turno, sin desync).
 - `tests/test_llm_runner.py` — el **runner embebido** por loopback: lobby
   automático, un turno en sincronía con estado "pensando" observable, respuesta
-  de chat (y que no se contesta a sí mismo), apagado limpio del hilo.
+  de chat (y que no se contesta a sí mismo), apagado limpio del hilo, y el log
+  de la consola (raw + resumen de órdenes + chat) poblado.
+- `tests/test_console_overlay.py` — la consola: `wrap_line` puro (líneas cortas
+  intactas para el mapa ASCII, palabras y palabras más largas que la línea),
+  dibujo headless con todos los tipos de entrada, scroll con PgUp/PgDn solo
+  cuando está visible, P (ocultar prompts), Ctrl+C (copiar), reset al reabrir.
 - `tests/test_ui_multiplayer.py` — la sección LLM del menú: navegación del hub,
   Ctrl+V/Ctrl+C (portapapeles falso), guardar la config en `settings.json`,
   freno sin API key y partida local que llega a `started` con el runner colgado

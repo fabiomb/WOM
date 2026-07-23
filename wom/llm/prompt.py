@@ -75,6 +75,8 @@ texto antes ni después, sin comentarios. Acciones válidas:
 Reglas para que tus órdenes sean válidas:
 - Usá solo ids de TUS ejércitos y coordenadas de TUS fuertes (los ves en la
   observación).
+- "army"/"source"/"target" llevan el NÚMERO de id que aparece en "Mis
+  ejércitos": para el ejército #7 escribí 7 (sin el "#").
 - Las coordenadas son [columna x, fila y]; x crece a la derecha, y hacia abajo.
 - No muevas a tiles de agua; no pidas más tropas de las que tiene un ejército.
 - Podés dar varias órdenes por turno (una por ejército como mucho para "move").

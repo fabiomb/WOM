@@ -197,6 +197,38 @@ def test_unknown_action_is_warned_not_crashed():
     assert any("desconocida" in w for w in warnings)
 
 
+def test_move_accepts_id_variants_and_key_synonyms():
+    """Los modelos chicos envuelven el id en texto o cambian la clave: se
+    aceptan "ejército 7", "army_id"/"id"/"unit", y la posición [x, y]."""
+    game = make_game()
+    army = my_army(game, 1)
+    dest = next(n for n in game.world.neighbors(army.position))
+    variants = [
+        {"action": "move", "army": f"ejército {army.id}", "to": list(dest)},
+        {"action": "move", "army_id": army.id, "to": list(dest)},
+        {"action": "move", "id": str(army.id), "to": list(dest)},
+        {"action": "move", "unit": f"#{army.id}", "to": list(dest)},
+        {"action": "move", "army": list(army.position), "to": list(dest)},  # por posición
+    ]
+    for action in variants:
+        orders, warnings = translate_actions([action], game, 1)
+        assert warnings == [], f"{action} → {warnings}"
+        assert orders and orders[0].army_id == army.id, f"{action}"
+
+
+def test_bad_army_id_warning_lists_own_ids():
+    """El rechazo enseña: incluye los ids propios (vuelve al modelo como
+    feedback en el turno siguiente)."""
+    game = make_game()
+    army = my_army(game, 1)
+    orders, warnings = translate_actions(
+        [{"action": "move", "army": 999, "to": [1, 1]}], game, 1
+    )
+    assert orders == []
+    assert warnings and "no existe" in warnings[0]
+    assert f"#{army.id}" in warnings[0], f"debe listar los ids propios: {warnings[0]}"
+
+
 def _open_tile_with_free_neighbor(game: Game):
     """Un tile sin sitio cuyo vecino también esté libre (para split)."""
     from wom.core.worldmap import Terrain
@@ -349,3 +381,22 @@ def test_llm_player_retries_then_passes_on_bad_json():
     orders = player.decide_orders(game)
     assert orders == []
     assert len(backend.calls) == 2, "reintenta una vez antes de pasar"
+
+
+def test_llm_player_feeds_back_previous_warnings():
+    """Los descartes de un turno vuelven al modelo en el prompt del siguiente
+    (feedback correctivo para modelos chicos)."""
+    game = make_game()
+    backend = FakeBackend(
+        '[{"action": "move", "army": 999, "to": [1, 1]}]',  # turno 1: id inválido
+        "[]",  # turno 2: pasa
+    )
+    player = LLMPlayer(1, backend)
+    player.decide_orders(game)
+    assert player.last_warnings, "el primer turno debió descartar la acción"
+    player.decide_orders(game)
+    _system, user = backend.calls[1]
+    assert "descartadas" in user and "#999" in user
+    assert player.last_observation == user, "expone el prompt tal como se envió"
+    # El primer prompt no llevaba feedback (no había turno anterior).
+    assert "descartadas" not in backend.calls[0][1]

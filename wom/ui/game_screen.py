@@ -61,6 +61,7 @@ from wom.ui.animation import (
 )
 from wom.ui.assets import Assets
 from wom.ui.battle_screen import BattleScreen
+from wom.ui.console_overlay import ConsoleOverlay
 from wom.ui.dialogs import TroopPicker
 from wom.ui.help_overlay import HelpOverlay
 from wom.ui.hud import Hud
@@ -179,6 +180,12 @@ class GameScreen:
         self._net_battle_id: int | None = None
         # Ayuda visual rápida (F1): modal por encima de todo, no toca el juego.
         self.help = HelpOverlay()
+        # Consola del rival LLM (F2): log en vivo de sus respuestas/decisiones.
+        # Solo existe con un runner embebido; no bloquea el input del juego.
+        self.console = ConsoleOverlay() if llm_runner is not None else None
+        if llm_runner is not None:
+            self.notice = "F2 abre la consola del LLM"
+            self.notice_until = pygame.time.get_ticks() + 6000
         self._dialog_buttons: dict[str, pygame.Rect] = {}
         # Doble click que fija la ruta: (ticks, tile) del último click de path.
         self._last_path_click: tuple[int, Coord] | None = None
@@ -249,6 +256,19 @@ class GameScreen:
         ):
             self.help.toggle()
             return
+        # Consola del LLM (F2): panel no-modal — el juego sigue recibiendo el
+        # input; la consola solo consume sus teclas (scroll, P, Ctrl+C), y
+        # nunca mientras se escribe en el chat.
+        if self.console is not None:
+            if not self.chat_active and self.console.handle_event(event):
+                return
+            if (
+                event.type == pygame.KEYDOWN
+                and event.key == pygame.K_F2
+                and not self.chat_active
+            ):
+                self.console.toggle()
+                return
         # Combate táctico activo: la pantalla de batalla domina todo el input.
         if self._tactical_battle is not None:
             self._tactical_battle.handle_event(event)
@@ -1025,6 +1045,9 @@ class GameScreen:
             self._draw_tactical_prompt(surface)
         elif self.net is not None and self.net.battle_present() and self.net.battle_phase() == "voting":
             self._draw_net_battle_prompt(surface)
+        # Consola del LLM: sobre el mapa y los modales, debajo de la ayuda.
+        if self.console is not None:
+            self.console.draw(surface, self.llm_runner)
         # La ayuda va arriba de todo (incluidos los modales).
         self.help.draw(surface, self.game)
         # La intro del escenario, si sigue abierta, manda sobre todo lo demás.

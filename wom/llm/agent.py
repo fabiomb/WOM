@@ -28,6 +28,7 @@ from wom.llm.observation import render_text
 from wom.llm.prompt import system_prompt
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+_MAX_FEEDBACK = 8  # descartes del turno anterior que se devuelven al modelo
 
 
 class LLMPlayer:
@@ -46,11 +47,21 @@ class LLMPlayer:
         self._log = logger or (lambda msg: print(f"[LLM p{player_id}] {msg}"))
         self.last_warnings: list[str] = []
         self.last_raw: str = ""
+        self.last_observation: str = ""  # el prompt de usuario tal como se envió
 
     def decide_orders(self, game: Game) -> list[Order]:
         """Órdenes del turno (igual interfaz que la AI)."""
         system = system_prompt(game, self.player_id)
         user = render_text(game, self.player_id)
+        # Feedback correctivo: los descartes del turno anterior vuelven al
+        # modelo, para que los chicos aprendan el formato/ids sobre la marcha.
+        if self.last_warnings:
+            listed = "\n".join(f"- {w}" for w in self.last_warnings[:_MAX_FEEDBACK])
+            user += (
+                "\n\nATENCIÓN: estas acciones tuyas del turno anterior fueron "
+                f"descartadas; corregí el formato o los ids:\n{listed}"
+            )
+        self.last_observation = user
         actions = self._query_actions(system, user)
         if actions is None:
             self._log("sin acciones utilizables: paso el turno")

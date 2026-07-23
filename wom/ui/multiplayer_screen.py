@@ -67,6 +67,7 @@ from wom.net.session import (
 from wom.net.transport import DEFAULT_PORT, Server, connect
 from wom.ui import scale, theme
 from wom.ui.assets import ASSETS_DIR
+from wom.ui.clipboard import clipboard_get, clipboard_put
 from wom.ui.menu_screen import (
     INK,
     INK_DIM,
@@ -104,22 +105,6 @@ class NetGameStart:
     rules: MatchRules
     peer_name: str = ""  # lo deriva NetGame de los jugadores si va vacío
     llm_runner: LLMRunner | None = None  # partida contra un LLM embebido
-
-
-def clipboard_get() -> str:
-    """Texto del portapapeles del sistema, o "" si no hay/no se puede."""
-    try:
-        return pygame.scrap.get_text() or ""
-    except Exception:
-        return ""  # sin display/clipboard (headless): degrada a nada
-
-
-def clipboard_put(text: str) -> None:
-    """Copia `text` al portapapeles del sistema (no-op si no se puede)."""
-    try:
-        pygame.scrap.put_text(text)
-    except Exception:
-        pass
 
 
 class TextField:
